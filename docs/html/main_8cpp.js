@@ -1,0 +1,25 @@
+var main_8cpp =
+[
+    [ "BUTTON_PIN", "main_8cpp.html#abc2ad14f0789907024ac765711ffd3da", null ],
+    [ "BUZZER_PIN", "main_8cpp.html#ab61d0981ed42df9e18211b273d22cfcd", null ],
+    [ "LED_PIN", "main_8cpp.html#ab4553be4db9860d940f81d7447173b2f", null ],
+    [ "RST_PIN", "main_8cpp.html#a36932b0e869e0114f32e255f61306d6b", null ],
+    [ "SS_PIN", "main_8cpp.html#a86fac98c9b4c98a3e50fc45440878391", null ],
+    [ "bluetoothTask", "main_8cpp.html#ab71f3f09431c6bfb41113e71ba8b11fb", null ],
+    [ "bt_callback", "main_8cpp.html#aae31dc6cd9d076e2edfceb7650d448a9", null ],
+    [ "buzzerTask", "main_8cpp.html#aa63d0b4c25e323e2fbc3d4d58289f454", null ],
+    [ "ledTask", "main_8cpp.html#ae0aa74cc8fc5e32a801eb281aff85dfd", null ],
+    [ "loop", "main_8cpp.html#afe461d27b9c48d5921c00d521181f12f", null ],
+    [ "mfrc522", "main_8cpp.html#ac672f817299d07cc428fe3f456235273", null ],
+    [ "rfidTask", "main_8cpp.html#aee267e3f10b709fae0aed3920428b71a", null ],
+    [ "setup", "main_8cpp.html#a4fc01d736fe50cf5b977f755b675f11d", null ],
+    [ "bluetoothConnected", "main_8cpp.html#a26bb68750fbe6694f333954811a3b5cc", null ],
+    [ "bluetoothTaskHandle", "main_8cpp.html#adc701a52849d4bd9d1e0e0d9d3b72390", null ],
+    [ "BTSerial", "main_8cpp.html#ac7b90d2557c3020671c997c9aca3a4a4", null ],
+    [ "buzzerSemaphore", "main_8cpp.html#a429d3eba30a126219122cc2f59407bc9", null ],
+    [ "buzzerTaskHandle", "main_8cpp.html#a15902271717234b9c94f2b5286ebb016", null ],
+    [ "DEVICE_ID", "main_8cpp.html#a2854d2b79ea8878e20e1da2769410c70", null ],
+    [ "jsonDataQueue", "main_8cpp.html#afba8855f91a89d4f7e2a34b9fd843420", null ],
+    [ "ledTaskHandle", "main_8cpp.html#a9227c54721d0ff94543483e0faece60e", null ],
+    [ "rfidTaskHandle", "main_8cpp.html#afa063b1dd2f7424c7e36844e9bf84a8e", null ]
+];

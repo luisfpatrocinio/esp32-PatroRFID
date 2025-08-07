@@ -1,4 +1,4 @@
-# ESP32 Handheld RFID Reader
+# Patro ESP32 Handheld RFID Reader
 
 Firmware for a handheld RFID reader based on the ESP32 microcontroller and MFRC522 module. The project leverages FreeRTOS for concurrent task management and transmits data over Bluetooth using a structured JSON protocol.
 

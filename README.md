@@ -4,7 +4,7 @@ Firmware for a handheld RFID reader based on the ESP32 microcontroller and MFRC5
 
 ![PatroRFID Project Photo](PatroRFID.png)
 
-## Features
+## ✨ Features
 
 * **Conditional Polling:** RFID scanning is active only when a push button is engaged.
 * **Wireless Data Transmission:** Utilizes Bluetooth Serial (SPP) to send data to a connected host.
@@ -12,7 +12,7 @@ Firmware for a handheld RFID reader based on the ESP32 microcontroller and MFRC5
 * **Multi-Tasking Architecture:** Built on FreeRTOS to handle hardware polling, user interface feedback, and communication tasks concurrently without blocking.
 * **User Feedback:** Provides both audible (buzzer) and visual (LED) feedback for successful reads and connection status.
 
-## Hardware Specifications
+## ⚙️ Hardware Specifications
 
 * 1 x ESP32 Development Board
 * 1 x MFRC522 RFID Reader Module (13.56MHz)
@@ -22,7 +22,7 @@ Firmware for a handheld RFID reader based on the ESP32 microcontroller and MFRC5
 * 1 x 220-330 Ohm Resistor
 * Breadboard and Jumper Wires
 
-## Wiring Diagram
+## 🔌 Wiring Diagram
 
 | Component | ESP32 Pin | 
 | :--- | :--- |
@@ -39,7 +39,7 @@ Firmware for a handheld RFID reader based on the ESP32 microcontroller and MFRC5
 
 *Note: The Button is configured with an internal pull-up resistor. The LED's anode connects to the GPIO pin via the current-limiting resistor.*
 
-## Software & Deployment
+## 💻 Software & Deployment
 
 This project is configured for the **PlatformIO** ecosystem within Visual Studio Code.
 
@@ -50,7 +50,7 @@ This project is configured for the **PlatformIO** ecosystem within Visual Studio
    * Open the project folder in VS Code.
    * Use the PlatformIO toolbar to **Upload** the firmware to the ESP32.
 
-## Operational Guide
+## 📖 Operational Guide
 
 1. **Power On:** Apply power to the ESP32 via USB. The status LED will blink, indicating it is awaiting a Bluetooth connection.
 2. **Bluetooth Pairing:** From a host device (PC, smartphone), scan for Bluetooth devices and pair with `PatroRFID-Reader`. Upon successful connection, the LED will cease blinking.
@@ -60,7 +60,7 @@ This project is configured for the **PlatformIO** ecosystem within Visual Studio
    * Present a compatible RFID tag to the MFRC522 antenna.
    * A successful read triggers an audible beep, and the corresponding JSON data payload is transmitted to the serial terminal.
 
-## Communication Protocol
+## 📶 Communication Protocol
 
 Data is serialized into a JSON object for transmission. This ensures data integrity and facilitates parsing on the client-side.
 

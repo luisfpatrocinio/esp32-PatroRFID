@@ -9,33 +9,100 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 
-#define SS_PIN 5      ///< ESP32 pin GPIO5 -> MFRC522 SDA/SS (Slave Select)
-#define RST_PIN 19    ///< ESP32 pin GPIO19 -> MFRC522 RST (Reset)
-#define BUZZER_PIN 22 ///< ESP32 pin GPIO22 -> Buzzer positive pin
-#define READ_BUTTON_PIN 21  ///< ESP32 pin GPIO21 -> Push button for reading
-#define WRITE_BUTTON_PIN 4 ///< ESP32 pin GPIO4 -> Push button for writing
-#define LED_PIN 2     ///< ESP32 pin GPIO2 -> Status LED
+/**
+ * @brief Pin definitions for RFID, Buzzer, Buttons, and LED.
+ */
+#define SS_PIN 5            ///< ESP32 GPIO5 -> MFRC522 SDA/SS (Slave Select)
+#define RST_PIN 19          ///< ESP32 GPIO19 -> MFRC522 RST (Reset)
+#define BUZZER_PIN 22       ///< ESP32 GPIO22 -> Buzzer positive pin
+#define READ_BUTTON_PIN 21  ///< ESP32 GPIO21 -> Push button for reading RFID
+#define WRITE_BUTTON_PIN 4  ///< ESP32 GPIO4 -> Push button for writing RFID
+#define LED_PIN 2           ///< ESP32 GPIO2 -> Status LED
 
+//==============================================================================
+// TASK PROTOTYPES - Include the new header file to access the information of the created modules.
+//==============================================================================
 
-// Protótipos das tasks
+/**
+ * @brief Task responsible for reading RFID tags.
+ * @param parameter Task parameters (not used in this implementation).
+ */
 void rfidTask(void *parameter);
+
+/**
+ * @brief Task responsible for writing data to RFID tags.
+ * @param parameter Task parameters (not used in this implementation).
+ */
 void rfidWriteTask(void *parameter);
+
+/**
+ * @brief Task responsible for handling Bluetooth communication.
+ * @param parameter Task parameters (not used in this implementation).
+ */
 void bluetoothTask(void *parameter);
+
+/**
+ * @brief Task responsible for controlling the buzzer alerts.
+ * @param parameter Task parameters (not used in this implementation).
+ */
 void buzzerTask(void *parameter);
+
+/**
+ * @brief Task responsible for controlling the status LED.
+ * @param parameter Task parameters (not used in this implementation).
+ */
 void ledTask(void *parameter);
 
-// Declarações de objetos e handles
+//==============================================================================
+// GLOBAL OBJECTS AND HANDLES
+//==============================================================================
+
+/** 
+ * @brief RFID reader object.
+ */
 extern MFRC522 mfrc522;
+
+/**
+ * @brief Bluetooth Serial communication object.
+ */
 extern BluetoothSerial BTSerial;
+
+/**
+ * @brief RFID MIFARE key used for authentication.
+ */
 extern MFRC522::MIFARE_Key key;
 
-// Variáveis globais
-extern volatile bool modoGravacao;
-extern volatile bool bluetoothConnected;
-extern String dadosParaGravar;
+//==============================================================================
+// GLOBAL VARIABLES
+//==============================================================================
 
-// Primitivas do FreeRTOS
+/**
+ * @brief Indicates if the system is in writing mode.
+ */
+extern volatile bool writeMode;
+
+/**
+ * @brief Indicates if a Bluetooth device is connected.
+ */
+extern volatile bool bluetoothConnected;
+
+/**
+ * @brief String containing the data to be written to an RFID tag.
+ */
+extern String dataToRecord;
+
+//==============================================================================
+// FREERTOS PRIMITIVES
+//==============================================================================
+
+/**
+ * @brief Queue to store JSON data for communication between tasks.
+ */
 extern QueueHandle_t jsonDataQueue;
+
+/**
+ * @brief Semaphore to control buzzer access between tasks.
+ */
 extern SemaphoreHandle_t buzzerSemaphore;
 
 #endif

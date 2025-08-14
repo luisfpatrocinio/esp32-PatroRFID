@@ -1,3 +1,42 @@
+/**
+ * @file main.cpp
+ * @author Luis Felipe Patrocinio (https://www.github.com/luisfpatrocinio)
+ * @brief Firmware for a handheld RFID reader with read and write functionality using ESP32, MFRC522, and FreeRTOS.
+ * @version 2.0
+ * @date 2025-08-12
+ *
+ * @copyright Copyright (c) 2025
+ *
+ * @mainpage Handheld RFID Reader/Writer Project
+ *
+ * @section intro_sec Introduction
+ * This project implements a fully functional handheld RFID reader/writer. It has two modes of operation:
+ * - **Read Mode:** Reads RFID tags when a button is held down, provides audible feedback, and sends data over Bluetooth.
+ * - **Write Mode:** Activates when a second button is held, allowing a simple string (up to 15 characters) to be sent via Bluetooth and written to a tag.
+ *
+ * @section arch_sec Architecture
+ * The firmware is built upon the FreeRTOS real-time operating system to handle
+ * multiple tasks concurrently and in a non-blocking fashion.
+ * - **rfidTask:** Manages reading the MFRC522 sensor, including authentication and reading of custom data.
+ * - **rfidWriteTask:** Manages writing data to the MFRC522 sensor, including authentication.
+ * - **bluetoothTask:** Handles sending and receiving data over Bluetooth Serial.
+ * - **ledTask:** Controls a status LED to indicate Bluetooth connection and activity.
+ * - **buzzerTask:** Provides audible feedback upon successful tag operations.
+ *
+ * @section proto_sec Communication Protocol
+ * Data is transmitted in a simplified string format for writing (e.g., "123456789012345") and a JSON format for reading.
+ * - **Read JSON Example:** `{"deviceId":"ESP32_RFID_Reader","uid":"A1:B2:C3:D4","cardType":"MIFARE 1K","data":"123456789012345"}`
+ * - **Write Data:** Send a simple string (e.g., "123456789012345") directly.
+ *
+ * @section hardware_sec Hardware
+ * - ESP32 Development Board
+ * - MFRC522 RFID Module
+ * - 2x Push Buttons (one for read, one for write)
+ * - Passive Buzzer
+ * - LED
+ */
+
+
 //==============================================================================
 // INCLUDES
 //==============================================================================
@@ -20,24 +59,24 @@
 //==============================================================================
 // GLOBAL OBJECTS & CONSTANTS
 //==============================================================================
-MFRC522 mfrc522(SS_PIN, RST_PIN);          
-BluetoothSerial BTSerial;                   
-const char *DEVICE_ID = "PatroRFID-Reader"; 
-volatile bool bluetoothConnected = false;   
-volatile bool modoGravacao = false;         
-String dadosParaGravar = "";                 
-MFRC522::MIFARE_Key key;                     
+MFRC522 mfrc522(SS_PIN, RST_PIN);          ///< Instance of the MFRC522 library.
+BluetoothSerial BTSerial;                   ///< Instance of the BluetoothSerial library.
+const char *DEVICE_ID = "PatroRFID-Reader"; ///< Unique identifier for this device.
+volatile bool bluetoothConnected = false;   ///< Global flag to track Bluetooth connection status.
+volatile bool writeMode = false;         ///< Global flag to enable write mode.
+String dataToRecord = "";                 ///< String to hold data for writing to a tag.
+MFRC522::MIFARE_Key key;                     ///< Key for authentication.
 
 //==============================================================================
 // FreeRTOS HANDLES
 //==============================================================================
-QueueHandle_t jsonDataQueue;        
-SemaphoreHandle_t buzzerSemaphore;  
-TaskHandle_t rfidTaskHandle;        
-TaskHandle_t rfidWriteTaskHandle;   
-TaskHandle_t bluetoothTaskHandle;   
-TaskHandle_t buzzerTaskHandle;      
-TaskHandle_t ledTaskHandle;         
+QueueHandle_t jsonDataQueue;        ///< Queue to pass JSON strings from rfidTask to bluetoothTask.
+SemaphoreHandle_t buzzerSemaphore;  ///< Binary semaphore to trigger the buzzer task.
+TaskHandle_t rfidTaskHandle;        ///< Handle for the RFID reader task.
+TaskHandle_t rfidWriteTaskHandle;   ///< Handle for the RFID writer task.
+TaskHandle_t bluetoothTaskHandle;   ///< Handle for the Bluetooth sender task.
+TaskHandle_t buzzerTaskHandle;      ///< Handle for the buzzer control task.
+TaskHandle_t ledTaskHandle;         ///< Handle for the status LED control task.
 
 //==============================================================================
 // FUNCTION PROTOTYPES
@@ -47,6 +86,10 @@ void bt_callback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param);
 //==============================================================================
 // SETUP FUNCTION
 //==============================================================================
+/**
+ * @brief Initializes all hardware, peripherals, FreeRTOS objects, and tasks.
+ * This function runs once on startup.
+ */
 void setup()
 {
     Serial.begin(115200);
@@ -96,16 +139,15 @@ void setup()
     Serial.println("FreeRTOS tasks created. System is running.");
 }
 
-void loop()
-{
-    // This loop is intentionally left empty.
-    // The FreeRTOS scheduler is managing all tasks.
-    vTaskDelay(pdMS_TO_TICKS(1000));
-}
-
 //==============================================================================
 // BLUETOOTH EVENT CALLBACK
 //==============================================================================
+/**
+ * @brief Callback function for Bluetooth events.
+ * @param event The type of event that occurred.
+ * @param param Parameters associated with the event.
+ * @note This function updates the global `bluetoothConnected` flag.
+ */
 void bt_callback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
 {
     if (event == ESP_SPP_SRV_OPEN_EVT)
@@ -118,4 +160,11 @@ void bt_callback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
         Serial.println("Bluetooth Client Disconnected.");
         bluetoothConnected = false;
     }
+}
+
+void loop()
+{
+    // This loop is intentionally left empty.
+    // The FreeRTOS scheduler is managing all tasks.
+    vTaskDelay(pdMS_TO_TICKS(1000));
 }

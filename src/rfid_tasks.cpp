@@ -2,16 +2,21 @@
 #include <ArduinoJson.h>
 
 //==============================================================================
-// TASK IMPLEMENTATIONS
+// RFID READER TASK 
 //==============================================================================
-
+/**
+ * @brief Checks for button press and reads RFID tags.
+ * @param parameter Unused task parameter.
+ * @note If the read button is held, this task polls the MFRC522. On a successful read,
+ * it constructs a JSON object with UID, card type, and custom data from block 4.
+ */
 // RFID READER TASK
 void rfidTask(void *parameter)
 {
     for (;;)
     {
         // Only run if not in write mode
-        if (digitalRead(READ_BUTTON_PIN) == LOW && !modoGravacao)
+        if (digitalRead(READ_BUTTON_PIN) == LOW && !writeMode)
         {
             if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial())
             {
@@ -77,21 +82,30 @@ void rfidTask(void *parameter)
 }
 
 
+//==============================================================================
 // RFID WRITER TASK
+//==============================================================================
+/**
+ * @brief Manages the RFID tag writing process.
+ * @param parameter Unused task parameter.
+ * @note This task waits for the write button to be held. When active, it waits for
+ * a simple string from the `bluetoothTask` and then writes the data to the next
+ * RFID tag that is presented. It first authenticates with the default key.
+ */
 void rfidWriteTask(void *parameter)
 {
     for (;;)
     {
         // Activate write mode when the write button is pressed
-        if (digitalRead(WRITE_BUTTON_PIN) == LOW && !modoGravacao)
+        if (digitalRead(WRITE_BUTTON_PIN) == LOW && !writeMode)
         {
-            modoGravacao = true;
-            dadosParaGravar = "";
+            writeMode = true;
+            dataToRecord = "";
             Serial.println("🔴 Write mode activated. Send a number (up to 15 digits) via Bluetooth.");
             vTaskDelay(pdMS_TO_TICKS(500));
         }
 
-        if (modoGravacao && dadosParaGravar.length() > 0)
+        if (writeMode && dataToRecord.length() > 0)
         {
             if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial())
             {
@@ -107,9 +121,9 @@ void rfidWriteTask(void *parameter)
                     Serial.println("✅ Authentication successful!");
                     
                     byte buffer[16] = {0};
-                    int len = dadosParaGravar.length();
+                    int len = dataToRecord.length();
                     if (len > 15) len = 15;
-                    strncpy((char*)buffer, dadosParaGravar.c_str(), len);
+                    strncpy((char*)buffer, dataToRecord.c_str(), len);
 
                     byte bloco = 4;
                     status = mfrc522.MIFARE_Write(bloco, buffer, 16);
@@ -127,13 +141,13 @@ void rfidWriteTask(void *parameter)
                 
                 mfrc522.PICC_HaltA();
                 mfrc522.PCD_StopCrypto1();
-                modoGravacao = false;
-                dadosParaGravar = "";
+                writeMode = false;
+                dataToRecord = "";
             }
         }
-        else if (digitalRead(WRITE_BUTTON_PIN) == HIGH && modoGravacao) {
-             modoGravacao = false;
-             dadosParaGravar = "";
+        else if (digitalRead(WRITE_BUTTON_PIN) == HIGH && writeMode) {
+             writeMode = false;
+             dataToRecord = "";
              Serial.println("🔵 Write mode deactivated.");
         }
 
@@ -142,7 +156,14 @@ void rfidWriteTask(void *parameter)
 }
 
 
+//==============================================================================
 // BLUETOOTH SENDER/RECEIVER TASK
+//==============================================================================
+/**
+ * @brief Waits for a JSON string from the queue or receives data from Bluetooth.
+ * @param parameter Unused task parameter.
+ * @note This task handles both sending read data and receiving write data.
+ */
 void bluetoothTask(void *parameter)
 {
     char receivedJson[256];
@@ -154,11 +175,11 @@ void bluetoothTask(void *parameter)
             msg = BTSerial.readStringUntil('\n');
             msg.trim();
 
-            if (modoGravacao)
+            if (writeMode)
             {
-                dadosParaGravar = msg;
+                dataToRecord = msg;
                 Serial.print("📥 Data for writing received: ");
-                Serial.println(dadosParaGravar);
+                Serial.println(dataToRecord);
             }
             else
             {
@@ -182,7 +203,14 @@ void bluetoothTask(void *parameter)
 }
 
 
+//==============================================================================
 // BUZZER TASK
+//==============================================================================
+/**
+ * @brief Waits for a signal and triggers a short beep on the buzzer.
+ * @param parameter Unused task parameter.
+ * @note This task remains blocked until `buzzerSemaphore` is given.
+ */
 void buzzerTask(void *parameter)
 {
     for (;;)
@@ -200,7 +228,15 @@ void buzzerTask(void *parameter)
     }
 }
 
+//==============================================================================
 // LED STATUS TASK
+//==============================================================================
+/**
+ * @brief Manages the status LED in a non-blocking loop.
+ * @param parameter Unused task parameter.
+ * @note Blinks the LED when Bluetooth is disconnected. When connected, the LED
+ * reflects the state of the read or write buttons.
+ */
 void ledTask(void *parameter)
 {
     for (;;)

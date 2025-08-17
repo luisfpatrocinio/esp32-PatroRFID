@@ -182,7 +182,7 @@ void bluetoothTask(void *parameter)
 
             else if (writeMode)
             {
-                dataToRecord = msgn;
+                dataToRecord = msg;
                 Serial.print("📥 Data for writing received: ");
                 Serial.println(dataToRecord);
             }

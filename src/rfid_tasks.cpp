@@ -2,7 +2,7 @@
 #include <ArduinoJson.h>
 
 //==============================================================================
-// RFID READER TASK 
+// RFID READER TASK
 //==============================================================================
 /**
  * @brief Checks for button press and reads RFID tags.
@@ -36,34 +36,40 @@ void rfidTask(void *parameter)
                 byte trailerBlock = 7; // Trailer block for Sector 1
                 MFRC522::StatusCode status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, trailerBlock, &key, &(mfrc522.uid));
 
-                if (status == MFRC522::STATUS_OK) {
-                    byte readBlock = 4; // Bloco onde os dados estão gravados
+                if (status == MFRC522::STATUS_OK)
+                {
+                    byte readBlock = 4;  // Bloco onde os dados estão gravados
                     byte readBuffer[18]; // 16 bytes de dados + 2 de CRC
-                    byte bufferSize = sizeof(readBuffer); 
+                    byte bufferSize = sizeof(readBuffer);
 
                     status = mfrc522.MIFARE_Read(readBlock, readBuffer, &bufferSize);
-                    if (status == MFRC522::STATUS_OK) {
+                    if (status == MFRC522::STATUS_OK)
+                    {
                         // Certifique-se de que a string é terminada com nulo.
                         readBuffer[16] = '\0';
-                        customData = String((char*)readBuffer);
-                    } else {
+                        customData = String((char *)readBuffer);
+                    }
+                    else
+                    {
                         customData = "Error reading data.";
                         Serial.print("❌ Read error: ");
                         Serial.println(mfrc522.GetStatusCodeName(status));
                     }
-                } else {
+                }
+                else
+                {
                     customData = "Authentication failed.";
                     Serial.print("❌ Authentication failed for read: ");
                     Serial.println(mfrc522.GetStatusCodeName(status));
                 }
-                
+
                 // --- Create JSON Object ---
-                JsonDocument jsonDoc; 
+                JsonDocument jsonDoc;
                 jsonDoc["uid"] = uidString;
                 jsonDoc["OEM-Codigo"] = customData;
 
                 // --- Serialize JSON to a string ---
-                char jsonString[128]; 
+                char jsonString[128];
                 serializeJson(jsonDoc, jsonString);
 
                 Serial.print("JSON Generated: ");
@@ -81,7 +87,6 @@ void rfidTask(void *parameter)
     }
 }
 
-
 //==============================================================================
 // RFID WRITER TASK
 //==============================================================================
@@ -96,34 +101,29 @@ void rfidWriteTask(void *parameter)
 {
     for (;;)
     {
-        // Activate write mode when the write button is pressed
-        if (digitalRead(WRITE_BUTTON_PIN) == LOW && !writeMode)
-        {
-            writeMode = true;
-            dataToRecord = "";
-            Serial.println("🔴 Write mode activated. Send a number (up to 15 digits) via Bluetooth.");
-            vTaskDelay(pdMS_TO_TICKS(500));
-        }
-
         if (writeMode && dataToRecord.length() > 0)
         {
             if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial())
             {
                 Serial.println("📡 Attempting to authenticate and write...");
 
-                byte trailerBlock = 7; 
+                byte trailerBlock = 7;
                 MFRC522::StatusCode status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, trailerBlock, &key, &(mfrc522.uid));
 
-                if (status != MFRC522::STATUS_OK) {
+                if (status != MFRC522::STATUS_OK)
+                {
                     Serial.print("❌ Authentication failed! Key may not be default: ");
                     Serial.println(mfrc522.GetStatusCodeName(status));
-                } else {
+                }
+                else
+                {
                     Serial.println("✅ Authentication successful!");
-                    
+
                     byte buffer[16] = {0};
                     int len = dataToRecord.length();
-                    if (len > 15) len = 15;
-                    strncpy((char*)buffer, dataToRecord.c_str(), len);
+                    if (len > 15)
+                        len = 15;
+                    strncpy((char *)buffer, dataToRecord.c_str(), len);
 
                     byte bloco = 4;
                     status = mfrc522.MIFARE_Write(bloco, buffer, 16);
@@ -138,23 +138,15 @@ void rfidWriteTask(void *parameter)
                         Serial.println(mfrc522.GetStatusCodeName(status));
                     }
                 }
-                
+
                 mfrc522.PICC_HaltA();
                 mfrc522.PCD_StopCrypto1();
-                writeMode = false;
                 dataToRecord = "";
             }
         }
-        else if (digitalRead(WRITE_BUTTON_PIN) == HIGH && writeMode) {
-             writeMode = false;
-             dataToRecord = "";
-             Serial.println("🔵 Write mode deactivated.");
-        }
-
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
-
 
 //==============================================================================
 // BLUETOOTH SENDER/RECEIVER TASK
@@ -175,9 +167,22 @@ void bluetoothTask(void *parameter)
             msg = BTSerial.readStringUntil('\n');
             msg.trim();
 
-            if (writeMode)
+            if (msg.equals("*WriteMode"))
             {
-                dataToRecord = msg;
+                writeMode = true;
+                dataToRecord = "";
+                Serial.println("🔴 Write mode ACTIVATED via Bluetooth. Send a number (up to 15 digits).");
+            }
+            else if (msg.equals("*StopWrite"))
+            {
+                writeMode = false;
+                dataToRecord = "";
+                Serial.println("🔵 Write mode STOPPED via Bluetooth.");
+            }
+
+            else if (writeMode)
+            {
+                dataToRecord = msgn;
                 Serial.print("📥 Data for writing received: ");
                 Serial.println(dataToRecord);
             }
@@ -201,7 +206,6 @@ void bluetoothTask(void *parameter)
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
-
 
 //==============================================================================
 // BUZZER TASK
@@ -250,7 +254,7 @@ void ledTask(void *parameter)
         }
         else
         {
-            digitalWrite(LED_PIN, (digitalRead(READ_BUTTON_PIN) == LOW || digitalRead(WRITE_BUTTON_PIN) == LOW) ? HIGH : LOW);
+            digitalWrite(LED_PIN, (digitalRead(READ_BUTTON_PIN) == LOW) ? HIGH : LOW);
             vTaskDelay(pdMS_TO_TICKS(50));
         }
     }

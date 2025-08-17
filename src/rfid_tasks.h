@@ -16,7 +16,6 @@
 #define RST_PIN 19          ///< ESP32 GPIO19 -> MFRC522 RST (Reset)
 #define BUZZER_PIN 22       ///< ESP32 GPIO22 -> Buzzer positive pin
 #define READ_BUTTON_PIN 21  ///< ESP32 GPIO21 -> Push button for reading RFID
-#define WRITE_BUTTON_PIN 4  ///< ESP32 GPIO4 -> Push button for writing RFID
 #define LED_PIN 2           ///< ESP32 GPIO2 -> Status LED
 
 //==============================================================================

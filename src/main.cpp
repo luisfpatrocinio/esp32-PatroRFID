@@ -50,10 +50,9 @@
 // PIN DEFINITIONS
 //==============================================================================
 #define SS_PIN 5      ///< ESP32 pin GPIO5 -> MFRC522 SDA/SS (Slave Select)
-#define RST_PIN 19    ///< ESP32 pin GPIO19 -> MFRC522 RST (Reset)
+#define RST_PIN 4    ///< ESP32 pin GPIO19 -> MFRC522 RST (Reset)
 #define BUZZER_PIN 22 ///< ESP32 pin GPIO22 -> Buzzer positive pin
 #define READ_BUTTON_PIN 21  ///< ESP32 pin GPIO21 -> Push button for reading
-#define WRITE_BUTTON_PIN 4 ///< ESP32 pin GPIO4 -> Push button for writing
 #define LED_PIN 2     ///< ESP32 pin GPIO2 -> Status LED
 
 //==============================================================================
@@ -103,7 +102,7 @@ void setup()
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, LOW);
     pinMode(READ_BUTTON_PIN, INPUT_PULLUP);
-    pinMode(WRITE_BUTTON_PIN, INPUT_PULLUP);
+
 
     // Create FreeRTOS primitives
     jsonDataQueue = xQueueCreate(5, sizeof(char[256]));
@@ -127,7 +126,7 @@ void setup()
     }
 
     Serial.println("Peripherals initialized.");
-    Serial.println("Hold the read button to scan tags. Hold the write button to write to tags.");
+    Serial.println("Hold the read button to scan tags. Use Bluetooth (*WriteMode / *StopWrite) for writing.");
 
     // Create and pin tasks to a specific core (Core 1)
     xTaskCreatePinnedToCore(rfidTask, "RFID_Task", 4096, NULL, 2, &rfidTaskHandle, 1);

@@ -40,7 +40,7 @@
 #include <SPI.h>
 #include <MFRC522.h>
 #include <ArduinoJson.h>
-#include "rfid_tasks.h"     // Tasks: rfidTask, rfidWriteTask, bluetoothTask, ledTask, buzzerTask
+#include "rfid_tasks.h" // Tasks: rfidTask, rfidWriteTask, bluetoothTask, ledTask, buzzerTask
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
@@ -49,17 +49,17 @@
 //==============================================================================
 // DEFINITIONS: BLE Services and Characteristics
 //==============================================================================
-#define SERVICE_UUID        "12345678-1234-1234-1234-1234567890ab"
+#define SERVICE_UUID "12345678-1234-1234-1234-1234567890ab"
 #define CHARACTERISTIC_UUID "abcdefab-1234-5678-1234-abcdefabcdef"
 
 //==============================================================================
 // PIN DEFINITIONS
 //==============================================================================
-#define SS_PIN              5   // MFRC522 SDA/SS
-#define RST_PIN             4   // MFRC522 RST
-#define BUZZER_PIN          22  // Buzzer
-#define READ_BUTTON_PIN     21  // Button for reading
-#define LED_PIN             2   // Status LED
+#define SS_PIN 5           // MFRC522 SDA/SS
+#define RST_PIN 4          // MFRC522 RST
+#define BUZZER_PIN 22      // Buzzer
+#define READ_BUTTON_PIN 21 // Button for reading
+#define LED_PIN 2          // Status LED
 
 //==============================================================================
 // GLOBAL OBJECTS & CONSTANTS
@@ -72,7 +72,7 @@ volatile bool writeMode = false;
 String dataToRecord = "";
 
 MFRC522 mfrc522(SS_PIN, RST_PIN);
-MFRC522::MIFARE_Key key;                  // Authentication key
+MFRC522::MIFARE_Key key; // Authentication key
 const char *DEVICE_ID = "PatroRFID-Reader";
 
 //==============================================================================
@@ -90,14 +90,17 @@ TaskHandle_t ledTaskHandle;
 //==============================================================================
 // BLE CALLBACKS
 //==============================================================================
-class MyServerCallbacks : public BLEServerCallbacks {
-    void onConnect(BLEServer *server) override {
+class MyServerCallbacks : public BLEServerCallbacks
+{
+    void onConnect(BLEServer *server) override
+    {
         deviceConnected = true;
         bluetoothConnected = true;
         Serial.println("BLE Client Connected.");
     }
 
-    void onDisconnect(BLEServer *server) override {
+    void onDisconnect(BLEServer *server) override
+    {
         deviceConnected = false;
         bluetoothConnected = false;
         Serial.println("BLE Client Disconnected.");
@@ -105,35 +108,113 @@ class MyServerCallbacks : public BLEServerCallbacks {
     }
 };
 
-
-class MyCallbacks : public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic *characteristic) override {
+//==============================================================================
+// BLE Characteristic Write Callback: Handles incoming BLE data for mode switching and writing
+//==============================================================================
+class MyCallbacks : public BLECharacteristicCallbacks
+{
+    // Called when a BLE client writes to the characteristic
+    void onWrite(BLECharacteristic *characteristic) override
+    {
         std::string rxValue = characteristic->getValue();
-        if (!rxValue.empty()) {
+        if (!rxValue.empty())
+        {
             Serial.print("Received over BLE: ");
             Serial.println(rxValue.c_str());
 
-            // Garanta que a string não tem espaços ou caracteres de nova linha
+            // Convert received value to String and trim whitespace
             String received = String(rxValue.c_str());
             received.trim();
 
-            if (xSemaphoreTake(writeDataMutex, portMAX_DELAY) == pdTRUE) {
-                if (received == "*WriteMode") {
-                    writeMode = true;
-                    dataToRecord = ""; 
-                    Serial.println("🔴 Write mode ACTIVATED via BLE. Waiting for data...");
-                } else if (received == "*StopWrite") {
-                    writeMode = false;
-                    dataToRecord = "";
-                    Serial.println("🔵 Write mode STOPPED via BLE.");
-                } else if (writeMode) { // Só entra aqui se writeMode já for TRUE
-                    dataToRecord = received;
-                    Serial.print("📥 Data for writing received: ");
-                    Serial.println(dataToRecord);
-                } else { // Nenhum dos casos acima se aplica
-                    Serial.println("⚠️ Data received but not in write mode. Discarding.");
+            // Attempt to parse received string as JSON
+            StaticJsonDocument<128> doc;
+            DeserializationError error = deserializeJson(doc, received);
+
+            // Prepare feedback JSON document for response
+            StaticJsonDocument<128> feedbackDoc;
+            String feedbackJson;
+
+            if (error)
+            {
+                // If JSON is invalid, notify client and discard
+                Serial.println("⚠️ Invalid JSON received. Discarding.");
+
+                feedbackDoc["type"] = "feedback";
+                feedbackDoc["content"]["status"] = "error";
+                feedbackDoc["content"]["message"] = "Invalid JSON received";
+                serializeJson(feedbackDoc, feedbackJson);
+                pCharacteristic->setValue(feedbackJson.c_str());
+                pCharacteristic->notify();
+
+                return;
+            }
+
+            // Extract "type" and "content" fields from JSON
+            const char* type = doc["type"];
+            const char* content = doc["content"];
+
+            // Protect writeMode and dataToRecord with mutex
+            if (xSemaphoreTake(writeDataMutex, portMAX_DELAY) == pdTRUE)
+            {
+                // Handle mode change requests
+                if (type && strcmp(type, "changeMode") == 0)
+                {
+                    if (content && strcmp(content, "write") == 0)
+                    {
+                        // Activate write mode
+                        writeMode = true;
+                        dataToRecord = "";
+                        Serial.println("🔴 Write mode ACTIVATED via BLE. Waiting for data...");
+
+                        feedbackDoc["type"] = "feedback";
+                        feedbackDoc["content"]["status"] = "ok";
+                        feedbackDoc["content"]["mode"] = "write";
+                        feedbackDoc["content"]["message"] = "Write mode activated";
+                    }
+                    else if (content && strcmp(content, "stop") == 0)
+                    {
+                        // Deactivate write mode
+                        writeMode = false;
+                        dataToRecord = "";
+                        Serial.println("🔵 Write mode STOPPED via BLE.");
+
+                        feedbackDoc["type"] = "feedback";
+                        feedbackDoc["content"]["status"] = "ok";
+                        feedbackDoc["content"]["mode"] = "read";
+                        feedbackDoc["content"]["message"] = "Write mode stopped";
+                    }
+                }
+                // Handle data to be written to RFID tag
+                else if (type && strcmp(type, "writeData") == 0 && writeMode)
+                {
+                    if (content)
+                    {
+                        // Store data for writing
+                        dataToRecord = String(content);
+                        Serial.print("📥 Data for writing received: ");
+                        Serial.println(dataToRecord);
+
+                        feedbackDoc["type"] = "feedback";
+                        feedbackDoc["content"]["status"] = "ok";
+                        feedbackDoc["content"]["message"] = "Data for writing received";
+                        feedbackDoc["content"]["data"] = dataToRecord;
+                    }
+                }
+                else
+                {
+                    // Unknown type or not in write mode
+                    Serial.println("⚠️ JSON received but not in write mode or unknown type. Discarding.");
+
+                    feedbackDoc["type"] = "feedback";
+                    feedbackDoc["content"]["status"] = "error";
+                    feedbackDoc["content"]["message"] = "Unknown type or not in write mode";
                 }
                 xSemaphoreGive(writeDataMutex);
+
+                // Send feedback to BLE client
+                serializeJson(feedbackDoc, feedbackJson);
+                pCharacteristic->setValue(feedbackJson.c_str());
+                pCharacteristic->notify();
             }
         }
     }
@@ -142,9 +223,11 @@ class MyCallbacks : public BLECharacteristicCallbacks {
 //==============================================================================
 // SETUP FUNCTION
 //==============================================================================
-void setup() {
+void setup()
+{
     Serial.begin(115200);
-    while (!Serial);
+    while (!Serial)
+        ;
 
     Serial.println("System Initializing...");
 
@@ -162,9 +245,11 @@ void setup() {
     buzzerSemaphore = xSemaphoreCreateBinary();
     writeDataMutex = xSemaphoreCreateMutex(); // <-- Inicialização do mutex
 
-    if (!jsonDataQueue || !buzzerSemaphore || !writeDataMutex) { // <-- Verificação de falha
+    // Check if FreeRTOS primitives were created successfully
+    if (!jsonDataQueue || !buzzerSemaphore || !writeDataMutex)
+    {
         Serial.println("Error creating RTOS primitives! Restarting...");
-        ESP.restart();
+        ESP.restart(); // Restart ESP32 if any primitive creation failed
     }
 
     // Initialize SPI + MFRC522
@@ -172,26 +257,34 @@ void setup() {
     mfrc522.PCD_Init();
 
     // Prepare default key (factory default 0xFF)
-    for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
+    for (byte i = 0; i < 6; i++)
+        key.keyByte[i] = 0xFF;
 
-    // Initialize BLE
+    // Initialize BLE stack with device name
     BLEDevice::init(DEVICE_ID);
+
+    // Create BLE server and set connection callbacks
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new MyServerCallbacks());
 
+    // Create BLE service with custom UUID
     BLEService *pService = pServer->createService(SERVICE_UUID);
 
+    // Create BLE characteristic with read, write, notify, and indicate properties
     pCharacteristic = pService->createCharacteristic(
         CHARACTERISTIC_UUID,
         BLECharacteristic::PROPERTY_READ |
-        BLECharacteristic::PROPERTY_WRITE |
-        BLECharacteristic::PROPERTY_NOTIFY |
-        BLECharacteristic::PROPERTY_INDICATE
-    );
+            BLECharacteristic::PROPERTY_WRITE |
+            BLECharacteristic::PROPERTY_NOTIFY |
+            BLECharacteristic::PROPERTY_INDICATE);
 
+    // Add BLE2902 descriptor for enabling notifications/indications on client side
     pCharacteristic->addDescriptor(new BLE2902());
+
+    // Set custom callbacks for BLE characteristic write events
     pCharacteristic->setCallbacks(new MyCallbacks());
 
+    // Start BLE service so it becomes available for clients
     pService->start();
 
     // Start advertising
@@ -219,7 +312,8 @@ void setup() {
 //==============================================================================
 // LOOP (FreeRTOS managed)
 //==============================================================================
-void loop() {
+void loop()
+{
     // FreeRTOS scheduler handles all tasks
     vTaskDelay(pdMS_TO_TICKS(1000));
 }

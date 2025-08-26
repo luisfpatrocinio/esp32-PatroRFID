@@ -7,18 +7,7 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
-
-//==============================================================================
-// PIN DEFINITIONS
-//==============================================================================
-/**
- * @brief Pin definitions for RFID, buzzer, buttons, and LED.
- */
-#define SS_PIN           5   ///< ESP32 GPIO5 -> MFRC522 SDA/SS (Slave Select)
-#define RST_PIN          4   ///< ESP32 GPIO4 -> MFRC522 RST (Reset)
-#define BUZZER_PIN       22  ///< ESP32 GPIO22 -> Buzzer positive pin
-#define READ_BUTTON_PIN  21  ///< ESP32 GPIO21 -> Push button for reading RFID
-#define LED_PIN          2   ///< ESP32 GPIO2 -> Status LED
+#include "config.h"
 
 //==============================================================================
 // TASK PROTOTYPES
@@ -86,6 +75,8 @@ extern String dataToRecord;
  * @brief Queue to store JSON data for communication between tasks.
  */
 extern QueueHandle_t jsonDataQueue;
+
+extern SemaphoreHandle_t writeDataMutex;
 
 /**
  * @brief Semaphore to control buzzer access between tasks.

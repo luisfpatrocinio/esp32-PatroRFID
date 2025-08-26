@@ -52,14 +52,7 @@
 #define SERVICE_UUID "12345678-1234-1234-1234-1234567890ab"
 #define CHARACTERISTIC_UUID "abcdefab-1234-5678-1234-abcdefabcdef"
 
-//==============================================================================
-// PIN DEFINITIONS
-//==============================================================================
-#define SS_PIN 5           // MFRC522 SDA/SS
-#define RST_PIN 4          // MFRC522 RST
-#define BUZZER_PIN 22      // Buzzer
-#define READ_BUTTON_PIN 21 // Button for reading
-#define LED_PIN 2          // Status LED
+#include "config.h"
 
 //==============================================================================
 // GLOBAL OBJECTS & CONSTANTS
@@ -70,6 +63,7 @@ bool deviceConnected = false;
 volatile bool bluetoothConnected = false;
 volatile bool writeMode = false;
 String dataToRecord = "";
+volatile bool soundEnabled = true;
 
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 MFRC522::MIFARE_Key key; // Authentication key
@@ -80,7 +74,7 @@ const char *DEVICE_ID = "PatroRFID-Reader";
 //==============================================================================
 QueueHandle_t jsonDataQueue;
 SemaphoreHandle_t buzzerSemaphore;
-SemaphoreHandle_t writeDataMutex; // <-- Declaração da variável mutex
+SemaphoreHandle_t writeDataMutex;
 TaskHandle_t rfidTaskHandle;
 TaskHandle_t rfidWriteTaskHandle;
 TaskHandle_t bluetoothTaskHandle;
@@ -150,8 +144,8 @@ class MyCallbacks : public BLECharacteristicCallbacks
             }
 
             // Extract "type" and "content" fields from JSON
-            const char* type = doc["type"];
-            const char* content = doc["content"];
+            const char *type = doc["type"];
+            const char *content = doc["content"];
 
             // Protect writeMode and dataToRecord with mutex
             if (xSemaphoreTake(writeDataMutex, portMAX_DELAY) == pdTRUE)
@@ -200,6 +194,25 @@ class MyCallbacks : public BLECharacteristicCallbacks
                         feedbackDoc["content"]["data"] = dataToRecord;
                     }
                 }
+                else if (type && strcmp(type, "toggleSound") == 0)
+                {
+                    if (content && strcmp(content, "on") == 0)
+                    {
+                        soundEnabled = true;
+                        Serial.println("🔊 Sound ENABLED via BLE.");
+                        feedbackDoc["type"] = "feedback";
+                        feedbackDoc["content"]["status"] = "ok";
+                        feedbackDoc["content"]["message"] = "Sound enabled";
+                    }
+                    else if (content && strcmp(content, "off") == 0)
+                    {
+                        soundEnabled = false;
+                        Serial.println("🔇 Sound DISABLED via BLE.");
+                        feedbackDoc["type"] = "feedback";
+                        feedbackDoc["content"]["status"] = "ok";
+                        feedbackDoc["content"]["message"] = "Sound disabled";
+                    }
+                }
                 else
                 {
                     // Unknown type or not in write mode
@@ -215,6 +228,9 @@ class MyCallbacks : public BLECharacteristicCallbacks
                 serializeJson(feedbackDoc, feedbackJson);
                 pCharacteristic->setValue(feedbackJson.c_str());
                 pCharacteristic->notify();
+
+                // Play sound
+                xSemaphoreGive(buzzerSemaphore);
             }
         }
     }

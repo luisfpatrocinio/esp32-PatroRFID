@@ -12,26 +12,50 @@ extern BLECharacteristic *pCharacteristic;
  * @param parameter Unused task parameter.
  * @note Reads UID and block 4 data, serializes as JSON, sends to BLE queue and triggers buzzer.
  */
-void rfidTask(void *parameter) {
+void rfidTask(void *parameter)
+{
     String lastUID = ""; // Guarda a última tag processada
-    for (;;) {
+    for (;;)
+    {
+
+        bool isWriteMode = false;
+
+        // Protect the readness of shared variable
+        if (xSemaphoreTake(writeDataMutex, (TickType_t)10) == pdTRUE)
+        {
+            isWriteMode = writeMode;
+            xSemaphoreGive(writeDataMutex);
+        }
+        else
+        {
+            // Failed to take mutex
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+
         // Apenas entre no loop de leitura se o botão estiver pressionado e não estiver em modo de escrita
-        if (digitalRead(READ_BUTTON_PIN) == LOW && !writeMode) {
+        if (digitalRead(READ_BUTTON_PIN) == LOW && !isWriteMode)
+        {
             // Verifica a presença de uma nova tag.
-            if (mfrc522.PICC_IsNewCardPresent()) { 
+            if (mfrc522.PICC_IsNewCardPresent())
+            {
                 // Se uma tag for encontrada, tenta ler o serial dela.
-                if (mfrc522.PICC_ReadCardSerial()) {
+                if (mfrc522.PICC_ReadCardSerial())
+                {
                     // --- Get UID ---
                     String uidString = "";
-                    for (byte i = 0; i < mfrc522.uid.size; i++) {
+                    for (byte i = 0; i < mfrc522.uid.size; i++)
+                    {
                         uidString.concat(mfrc522.uid.uidByte[i] < 0x10 ? "0" : "");
                         uidString.concat(String(mfrc522.uid.uidByte[i], HEX));
-                        if (i < mfrc522.uid.size - 1) uidString.concat(":");
+                        if (i < mfrc522.uid.size - 1)
+                            uidString.concat(":");
                     }
                     uidString.toUpperCase();
 
                     // Só processa se for uma tag diferente da última lida
-                    if (uidString != lastUID) {
+                    if (uidString != lastUID)
+                    {
                         lastUID = uidString; // Atualiza a última tag processada
 
                         // --- Authenticate and Read Data from Block 4 ---
@@ -41,22 +65,27 @@ void rfidTask(void *parameter) {
                             MFRC522::PICC_CMD_MF_AUTH_KEY_A,
                             trailerBlock,
                             &key,
-                            &(mfrc522.uid)
-                        );
+                            &(mfrc522.uid));
 
-                        if (status == MFRC522::STATUS_OK) {
+                        if (status == MFRC522::STATUS_OK)
+                        {
                             byte readBlock = 4;
-                            byte readBuffer[18]; 
+                            byte readBuffer[18];
                             byte bufferSize = sizeof(readBuffer);
 
                             status = mfrc522.MIFARE_Read(readBlock, readBuffer, &bufferSize);
-                            if (status == MFRC522::STATUS_OK) {
+                            if (status == MFRC522::STATUS_OK)
+                            {
                                 readBuffer[16] = '\0';
                                 customData = String((char *)readBuffer);
-                            } else {
+                            }
+                            else
+                            {
                                 customData = "Error reading data.";
                             }
-                        } else {
+                        }
+                        else
+                        {
                             customData = "Authentication failed.";
                         }
 
@@ -74,7 +103,9 @@ void rfidTask(void *parameter) {
                     mfrc522.PCD_StopCrypto1();
                 }
             }
-        } else {
+        }
+        else
+        {
             // Se o botão não estiver pressionado, reseta a última UID lida para permitir uma nova leitura
             // quando o botão for pressionado novamente.
             lastUID = "";
@@ -82,7 +113,6 @@ void rfidTask(void *parameter) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
-
 
 //==============================================================================
 // RFID WRITER TASK
@@ -92,10 +122,31 @@ void rfidTask(void *parameter) {
  * @param parameter Unused task parameter.
  * @note Waits for BLE write data and writes to next tag presented.
  */
-void rfidWriteTask(void *parameter) {
-    for (;;) {
-        if (writeMode && dataToRecord.length() > 0) {
-            if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
+void rfidWriteTask(void *parameter)
+{
+    for (;;)
+    {
+
+        bool isWriteMode;
+        String localDataToRecord;
+
+        // Protect the shared resource
+        if (xSemaphoreTake(writeDataMutex, (TickType_t)10) == pdTRUE)
+        {
+            isWriteMode = writeMode;
+            localDataToRecord = dataToRecord;
+            xSemaphoreGive(writeDataMutex);
+        }
+        else
+        {
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+
+        if (isWriteMode && localDataToRecord.length() > 0)
+        {
+            if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial())
+            {
 
                 Serial.println("📡 Attempting to authenticate and write...");
 
@@ -104,30 +155,48 @@ void rfidWriteTask(void *parameter) {
                     MFRC522::PICC_CMD_MF_AUTH_KEY_A,
                     trailerBlock,
                     &key,
-                    &(mfrc522.uid)
-                );
+                    &(mfrc522.uid));
 
-                if (status != MFRC522::STATUS_OK) {
+                if (status != MFRC522::STATUS_OK)
+                {
                     Serial.print("❌ Authentication failed! Key may not be default: ");
                     Serial.println(mfrc522.GetStatusCodeName(status));
-                } else {
+                }
+                else
+                {
                     Serial.println("✅ Authentication successful!");
 
                     // Prepare buffer
                     byte buffer[16] = {0};
                     int len = dataToRecord.length();
-                    if (len > 15) len = 15;
+                    if (len > 15)
+                        len = 15;
                     strncpy((char *)buffer, dataToRecord.c_str(), len);
+
+                    // Create feedback JSON
+                    JsonDocument feedbackDoc;
+                    feedbackDoc["type"] = "feedback"; // TODO: Analisar se deveria ser "writeFeedback"
 
                     byte block = 4;
                     status = mfrc522.MIFARE_Write(block, buffer, 16);
-                    if (status == MFRC522::STATUS_OK) {
+                    if (status == MFRC522::STATUS_OK)
+                    {
                         Serial.println("✅ Write successful!");
+                        feedbackDoc["content"]["status"] = "ok";
+                        feedbackDoc["content"]["message"] = "Write successful";
                         xSemaphoreGive(buzzerSemaphore);
-                    } else {
+                    }
+                    else
+                    {
                         Serial.print("❌ Write error: ");
                         Serial.println(mfrc522.GetStatusCodeName(status));
+                        feedbackDoc["content"]["status"] = "error";
+                        feedbackDoc["content"]["message"] = "Write Failed: " + String(mfrc522.GetStatusCodeName(status));
                     }
+
+                    char feedbackJson[256];
+                    serializeJson(feedbackDoc, feedbackJson);
+                    xQueueSend(jsonDataQueue, &feedbackJson, (TickType_t)10); // Send feedback JSON to queue
                 }
 
                 mfrc522.PICC_HaltA();
@@ -146,17 +215,23 @@ void rfidWriteTask(void *parameter) {
  * @brief Sends JSON strings via BLE notify.
  * @param parameter Unused task parameter.
  */
-void bluetoothTask(void *parameter) {
+void bluetoothTask(void *parameter)
+{
     char receivedJson[256];
-    for (;;) {
-        if (xQueueReceive(jsonDataQueue, &receivedJson, 0) == pdPASS) {
-            if (bluetoothConnected && pCharacteristic != nullptr) {
+    for (;;)
+    {
+        if (xQueueReceive(jsonDataQueue, &receivedJson, 0) == pdPASS)
+        {
+            if (bluetoothConnected && pCharacteristic != nullptr)
+            {
                 Serial.print("📤 Sending via BLE: ");
                 Serial.println(receivedJson);
 
                 pCharacteristic->setValue((uint8_t *)receivedJson, strlen(receivedJson));
                 pCharacteristic->notify();
-            } else {
+            }
+            else
+            {
                 Serial.println("⚠️ BLE device not connected. JSON discarded.");
             }
         }
@@ -171,16 +246,18 @@ void bluetoothTask(void *parameter) {
  * @brief Triggers a short beep on the buzzer.
  * @param parameter Unused task parameter.
  */
-void buzzerTask(void *parameter) {
-    for (;;) {
-        if (xSemaphoreTake(buzzerSemaphore, portMAX_DELAY) == pdTRUE) {
-            digitalWrite(BUZZER_PIN, HIGH);
-            vTaskDelay(pdMS_TO_TICKS(100));
-            digitalWrite(BUZZER_PIN, LOW);
-            vTaskDelay(pdMS_TO_TICKS(50));
-            digitalWrite(BUZZER_PIN, HIGH);
-            vTaskDelay(pdMS_TO_TICKS(100));
-            digitalWrite(BUZZER_PIN, LOW);
+void buzzerTask(void *parameter)
+{
+    for (;;)
+    {
+        if (soundEnabled)
+        {
+            if (xSemaphoreTake(buzzerSemaphore, portMAX_DELAY) == pdTRUE)
+            {
+                digitalWrite(BUZZER_PIN, HIGH);
+                vTaskDelay(pdMS_TO_TICKS(100));
+                digitalWrite(BUZZER_PIN, LOW);
+            }
         }
     }
 }
@@ -193,14 +270,19 @@ void buzzerTask(void *parameter) {
  * @param parameter Unused task parameter.
  * @note Blinks LED when BLE disconnected. Reflects button state when connected.
  */
-void ledTask(void *parameter) {
-    for (;;) {
-        if (!bluetoothConnected) {
+void ledTask(void *parameter)
+{
+    for (;;)
+    {
+        if (!bluetoothConnected)
+        {
             digitalWrite(LED_PIN, HIGH);
             vTaskDelay(pdMS_TO_TICKS(250));
             digitalWrite(LED_PIN, LOW);
             vTaskDelay(pdMS_TO_TICKS(250));
-        } else {
+        }
+        else
+        {
             digitalWrite(LED_PIN, (digitalRead(READ_BUTTON_PIN) == LOW) ? HIGH : LOW);
             vTaskDelay(pdMS_TO_TICKS(50));
         }

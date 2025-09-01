@@ -17,6 +17,7 @@
 #include "freertos/semphr.h"
 #include <MFRC522.h>
 #include <BLECharacteristic.h>
+#include "config.h"
 
 //==============================================================================
 // GLOBAL OBJECTS
@@ -31,7 +32,6 @@ extern BLECharacteristic *pCharacteristic; ///< Global pointer to the BLE charac
 extern volatile bool bluetoothConnected; ///< True if a BLE client is connected.
 extern volatile bool writeMode;          ///< True if the device is in RFID write mode.
 extern String dataToRecord;              ///< Data buffer for the RFID write operation.
-extern volatile bool soundEnabled;       ///< True if audible feedback is enabled.
 
 //==============================================================================
 // FREERTOS PRIMITIVES (HANDLES)

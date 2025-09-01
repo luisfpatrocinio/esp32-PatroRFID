@@ -2,7 +2,7 @@
  * @file config.h
  * @author Luis Felipe Patrocinio
  * @brief Centralized hardware pin definitions and application constants.
- * @date 2025-08-26
+ * @date 2025-09-01
  */
 
 #ifndef CONFIG_H
@@ -22,7 +22,9 @@
 //==============================================================================
 // RFID CONFIG
 //==============================================================================
-const byte DATA_BLOCK = 4;      ///< MIFARE block used for storing custom data.
-const byte TRAILER_BLOCK = 7;   ///< MIFARE sector trailer block for authentication.
+const byte DATA_BLOCK = 4;    ///< MIFARE block used for storing custom data.
+const byte TRAILER_BLOCK = 7; ///< MIFARE sector trailer block for authentication.
+
+extern volatile bool soundEnabled;
 
 #endif // CONFIG_H

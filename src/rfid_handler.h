@@ -9,6 +9,7 @@
 #define RFID_HANDLER_H
 
 #include <Arduino.h>
+#include "config.h"
 
 /**
  * @brief FreeRTOS task to read RFID tags when the button is pressed.

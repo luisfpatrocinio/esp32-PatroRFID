@@ -9,6 +9,7 @@
 #define BLE_COMM_H
 
 #include <Arduino.h>
+#include "config.h"
 
 /**
  * @brief Initializes the BLE server, service, characteristic, and starts advertising.

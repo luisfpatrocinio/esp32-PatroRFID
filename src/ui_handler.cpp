@@ -7,7 +7,6 @@
 
 #include "ui_handler.h"
 #include "rtos_comm.h"
-#include "config.h"
 
 //==============================================================================
 // BUZZER TASK

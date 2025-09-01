@@ -2,7 +2,7 @@
  * @file ble_comm.cpp
  * @author Luis Felipe Patrocinio
  * @brief Implementation of BLE communication setup, callbacks, and task.
- * @date 2025-08-26
+ * @date 2025-09-01
  */
 
 #include "ble_comm.h"

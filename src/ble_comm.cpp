@@ -30,14 +30,17 @@ class MyServerCallbacks : public BLEServerCallbacks
 {
     void onConnect(BLEServer *server) override
     {
+        // Set the global flag to indicate BLE client is connected
         bluetoothConnected = true;
         Serial.println("BLE Client Connected.");
     }
 
     void onDisconnect(BLEServer *server) override
     {
+        // Clear the global flag when BLE client disconnects
         bluetoothConnected = false;
         Serial.println("BLE Client Disconnected.");
+        // Restart advertising so new clients can connect
         BLEDevice::startAdvertising(); // Keep advertising
     }
 };
@@ -59,6 +62,7 @@ class MyCallbacks : public BLECharacteristicCallbacks
         String received = String(rxValue.c_str());
         received.trim();
 
+            // Parse the received JSON string
         StaticJsonDocument<128> doc;
         DeserializationError error = deserializeJson(doc, received);
 
@@ -67,6 +71,7 @@ class MyCallbacks : public BLECharacteristicCallbacks
 
         if (error)
         {
+                // If JSON is invalid, prepare error feedback
             feedbackDoc["type"] = "feedback";
             feedbackDoc["content"]["status"] = "error";
             feedbackDoc["content"]["message"] = "Invalid JSON received";
@@ -76,12 +81,15 @@ class MyCallbacks : public BLECharacteristicCallbacks
             const char *type = doc["type"];
             const char *content = doc["content"];
 
+                // Protect shared state with mutex before handling commands
             if (xSemaphoreTake(writeDataMutex, portMAX_DELAY) == pdTRUE)
             {
+                    // Handle mode change command
                 if (type && strcmp(type, "changeMode") == 0)
                 {
                     if (content && strcmp(content, "write") == 0)
                     {
+                            // Enable write mode and clear previous data
                         writeMode = true;
                         dataToRecord = "";
                         feedbackDoc["content"]["mode"] = "write";
@@ -89,39 +97,48 @@ class MyCallbacks : public BLECharacteristicCallbacks
                     }
                     else if (content && strcmp(content, "stop") == 0)
                     {
+                            // Disable write mode and clear previous data
                         writeMode = false;
                         dataToRecord = "";
                         feedbackDoc["content"]["mode"] = "read";
                         feedbackDoc["content"]["message"] = "Write mode stopped";
                     }
                 }
+                    // Handle data to be written to RFID tag
                 else if (type && strcmp(type, "writeData") == 0 && writeMode)
                 {
                     dataToRecord = String(content);
                     feedbackDoc["content"]["message"] = "Data for writing received";
                     feedbackDoc["content"]["data"] = dataToRecord;
                 }
+                    // Handle sound toggle command
                 else if (type && strcmp(type, "toggleSound") == 0)
                 {
+                        // Update global soundEnabled flag based on received content
                     soundEnabled = (content && strcmp(content, "on") == 0);
                     feedbackDoc["content"]["message"] = soundEnabled ? "Sound enabled" : "Sound disabled";
                 }
                 else
                 {
+                        // Unknown command 
                     feedbackDoc["content"]["status"] = "error";
-                    feedbackDoc["content"]["message"] = "Unknown type or not in write mode";
+                    feedbackDoc["content"]["message"] = "Unknown type";
                 }
 
+                    // If no error, set status to ok
                 if (!feedbackDoc["content"]["status"])
                     feedbackDoc["content"]["status"] = "ok";
                 feedbackDoc["type"] = "feedback";
+                    // Release mutex after handling command
                 xSemaphoreGive(writeDataMutex);
             }
         }
 
+            // Send feedback JSON to BLE client
         serializeJson(feedbackDoc, feedbackJson);
         characteristic->setValue(feedbackJson.c_str());
         characteristic->notify();
+            // Signal buzzer task to provide feedback
         xSemaphoreGive(buzzerSemaphore);
     }
 };
@@ -131,11 +148,15 @@ class MyCallbacks : public BLECharacteristicCallbacks
 //==============================================================================
 void setupBLE()
 {
+    // Initialize BLE device with custom name
     BLEDevice::init(DEVICE_ID);
+    // Create BLE server and set connection callbacks
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new MyServerCallbacks());
+    // Create BLE service with custom UUID
     BLEService *pService = pServer->createService(SERVICE_UUID);
 
+    // Create BLE characteristic with read, write, notify, and indicate properties
     pCharacteristic = pService->createCharacteristic(
         CHARACTERISTIC_UUID,
         BLECharacteristic::PROPERTY_READ |
@@ -143,15 +164,20 @@ void setupBLE()
             BLECharacteristic::PROPERTY_NOTIFY |
             BLECharacteristic::PROPERTY_INDICATE);
 
+    // Add descriptor for BLE notifications
     pCharacteristic->addDescriptor(new BLE2902());
+    // Set custom callbacks for BLE characteristic
     pCharacteristic->setCallbacks(new MyCallbacks());
+    // Start BLE service
     pService->start();
 
+    // Configure BLE advertising parameters
     BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
     pAdvertising->setScanResponse(true);
     pAdvertising->setMinPreferred(0x06);
     pAdvertising->setMinPreferred(0x12);
+    // Start advertising so clients can discover the device
     BLEDevice::startAdvertising();
     Serial.println("BLE service started, waiting for client...");
 }
@@ -164,19 +190,19 @@ void bluetoothTask(void *parameter)
     char receivedJson[256];
     for (;;)
     {
+        // Wait for JSON data from the queue (produced by other tasks)
         if (xQueueReceive(jsonDataQueue, &receivedJson, portMAX_DELAY) == pdPASS)
         {
+            // Only send data if BLE client is connected and characteristic is valid
             if (bluetoothConnected && pCharacteristic != nullptr)
             {
                 Serial.print("📤 Sending via BLE: ");
                 Serial.println(receivedJson);
+                // Set characteristic value and notify client
                 pCharacteristic->setValue((uint8_t *)receivedJson, strlen(receivedJson));
                 pCharacteristic->notify();
             }
-            else
-            {
-                Serial.println("⚠️ BLE device not connected. JSON discarded.");
-            }
+            // If not connected, discard the message (no notification sent)
         }
     }
 }

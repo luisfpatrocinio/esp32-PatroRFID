@@ -86,7 +86,6 @@ void setup()
 //==============================================================================
 void loop()
 {
-    // The FreeRTOS scheduler handles all tasks, so the main loop can be empty
-    // or used for very low-priority background tasks.
+    // FreeRTOS handles tasks; main loop remains empty.
     vTaskDelay(pdMS_TO_TICKS(1000));
 }

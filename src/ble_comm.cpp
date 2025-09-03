@@ -62,7 +62,7 @@ class MyCallbacks : public BLECharacteristicCallbacks
         String received = String(rxValue.c_str());
         received.trim();
 
-            // Parse the received JSON string
+        // Parse the received JSON string
         StaticJsonDocument<128> doc;
         DeserializationError error = deserializeJson(doc, received);
 
@@ -71,7 +71,7 @@ class MyCallbacks : public BLECharacteristicCallbacks
 
         if (error)
         {
-                // If JSON is invalid, prepare error feedback
+            // If JSON is invalid, prepare error feedback
             feedbackDoc["type"] = "feedback";
             feedbackDoc["content"]["status"] = "error";
             feedbackDoc["content"]["message"] = "Invalid JSON received";

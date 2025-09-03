@@ -63,10 +63,10 @@ class MyCallbacks : public BLECharacteristicCallbacks
         received.trim();
 
         // Parse the received JSON string
-        StaticJsonDocument<128> doc;
+        JsonDocument doc;
         DeserializationError error = deserializeJson(doc, received);
 
-        StaticJsonDocument<128> feedbackDoc;
+        JsonDocument feedbackDoc;
         String feedbackJson;
 
         if (error)

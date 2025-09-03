@@ -17,7 +17,6 @@
 #include "freertos/semphr.h"
 #include <MFRC522.h>
 #include <BLECharacteristic.h>
-#include "config.h"
 
 //==============================================================================
 // GLOBAL OBJECTS

@@ -5,13 +5,29 @@
  * @date 2025-09-01
  */
 
-#include "ble_comm.h"
-#include "rtos_comm.h"
+//==============================================================================
+// Arduino & ESP32 Includes
+//==============================================================================
+#include <ArduinoJson.h>
+
+//==============================================================================
+// Project Header Includes
+//==============================================================================
+#include "config.h"
+
+//==============================================================================
+// BLE Library Includes
+//==============================================================================
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
-#include <ArduinoJson.h>
+
+//==============================================================================
+// Project Header Includes
+//==============================================================================
+#include "ble_comm.h"
+#include "rtos_comm.h"
 
 //==============================================================================
 // DEFINITIONS
@@ -81,15 +97,15 @@ class MyCallbacks : public BLECharacteristicCallbacks
             const char *type = doc["type"];
             const char *content = doc["content"];
 
-                // Protect shared state with mutex before handling commands
+            // Protect shared state with mutex before handling commands
             if (xSemaphoreTake(writeDataMutex, portMAX_DELAY) == pdTRUE)
             {
-                    // Handle mode change command
+                // Handle mode change command
                 if (type && strcmp(type, "changeMode") == 0)
                 {
                     if (content && strcmp(content, "write") == 0)
                     {
-                            // Enable write mode and clear previous data
+                        // Enable write mode and clear previous data
                         writeMode = true;
                         dataToRecord = "";
                         feedbackDoc["content"]["mode"] = "write";
@@ -97,48 +113,48 @@ class MyCallbacks : public BLECharacteristicCallbacks
                     }
                     else if (content && strcmp(content, "stop") == 0)
                     {
-                            // Disable write mode and clear previous data
+                        // Disable write mode and clear previous data
                         writeMode = false;
                         dataToRecord = "";
                         feedbackDoc["content"]["mode"] = "read";
                         feedbackDoc["content"]["message"] = "Write mode stopped";
                     }
                 }
-                    // Handle data to be written to RFID tag
+                // Handle data to be written to RFID tag
                 else if (type && strcmp(type, "writeData") == 0 && writeMode)
                 {
                     dataToRecord = String(content);
                     feedbackDoc["content"]["message"] = "Data for writing received";
                     feedbackDoc["content"]["data"] = dataToRecord;
                 }
-                    // Handle sound toggle command
+                // Handle sound toggle command
                 else if (type && strcmp(type, "toggleSound") == 0)
                 {
-                        // Update global soundEnabled flag based on received content
+                    // Update global soundEnabled flag based on received content
                     soundEnabled = (content && strcmp(content, "on") == 0);
                     feedbackDoc["content"]["message"] = soundEnabled ? "Sound enabled" : "Sound disabled";
                 }
                 else
                 {
-                        // Unknown command 
+                    // Unknown command
                     feedbackDoc["content"]["status"] = "error";
                     feedbackDoc["content"]["message"] = "Unknown type";
                 }
 
-                    // If no error, set status to ok
+                // If no error, set status to ok
                 if (!feedbackDoc["content"]["status"])
                     feedbackDoc["content"]["status"] = "ok";
                 feedbackDoc["type"] = "feedback";
-                    // Release mutex after handling command
+                // Release mutex after handling command
                 xSemaphoreGive(writeDataMutex);
             }
         }
 
-            // Send feedback JSON to BLE client
+        // Send feedback JSON to BLE client
         serializeJson(feedbackDoc, feedbackJson);
         characteristic->setValue(feedbackJson.c_str());
         characteristic->notify();
-            // Signal buzzer task to provide feedback
+        // Signal buzzer task to provide feedback
         xSemaphoreGive(buzzerSemaphore);
     }
 };

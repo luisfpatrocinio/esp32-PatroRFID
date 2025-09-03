@@ -8,7 +8,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#include <Arduino.h> // For 'byte' type
+#include <Arduino.h>
 
 //==============================================================================
 // PIN DEFINITIONS

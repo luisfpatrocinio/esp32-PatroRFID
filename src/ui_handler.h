@@ -8,9 +8,6 @@
 #ifndef UI_HANDLER_H
 #define UI_HANDLER_H
 
-#include <Arduino.h>
-#include "config.h"
-
 /**
  * @brief FreeRTOS task to provide audible feedback via the buzzer.
  * @param parameter Unused task parameter.

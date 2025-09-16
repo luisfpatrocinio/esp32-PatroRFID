@@ -1,7 +1,6 @@
 //==============================================================================
 // Project Header Includes
 //==============================================================================
-#include "config.h"
 /**
  * @file main.cpp
  * @author Luis Felipe Patrocinio (https://www.github.com/luisfpatrocinio)

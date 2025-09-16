@@ -85,11 +85,11 @@ void rfidTask(void *parameter)
                         // Could not access tag memory block, cannot read data
                         customData = "Tag access error.";
                     }
-                    // Prepare JSON with UID and data to send via BLE
+                    // Prepare JSON with 'type' and 'content' fields
                     JsonDocument jsonDoc;
                     jsonDoc["type"] = "readResult";
-                    jsonDoc["uid"] = uidString;
-                    jsonDoc["data"] = customData;
+                    jsonDoc["content"]["uid"] = uidString;
+                    jsonDoc["content"]["data"] = customData;
                     char jsonString[128];
                     serializeJson(jsonDoc, jsonString);
                     // Send JSON to BLE queue for notification
@@ -138,7 +138,7 @@ void rfidWriteTask(void *parameter)
             {
                 // Prepare feedback JSON for BLE notification
                 JsonDocument feedbackDoc;
-                feedbackDoc["type"] = "writeResult";
+                feedbackDoc["type"] = "feedback";
                 Serial.println("Attempting to write data to RFID tag...");
 
                 // Access the RFID tag's memory block before writing data

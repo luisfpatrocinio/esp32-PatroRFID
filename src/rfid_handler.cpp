@@ -165,7 +165,7 @@ void rfidWriteTask(void *parameter)
                     {
                         // Write successful, signal buzzer for feedback
                         feedbackDoc["content"]["status"] = "ok";
-                        feedbackDoc["content"]["message"] = "Write successful";
+                        feedbackDoc["content"]["message"] = "Write successful: " + localDataToRecord;
                         xSemaphoreGive(buzzerSemaphore);
                         Serial.println("Data written successfully to RFID tag.");
                     }
@@ -186,13 +186,6 @@ void rfidWriteTask(void *parameter)
                 // Halt communication with card and stop encryption
                 mfrc522.PICC_HaltA();
                 mfrc522.PCD_StopCrypto1();
-
-                // Clear dataToRecord after writing (protected by mutex)
-                if (xSemaphoreTake(writeDataMutex, (TickType_t)10) == pdTRUE)
-                {
-                    dataToRecord = "";
-                    xSemaphoreGive(writeDataMutex);
-                }
             }
         }
         // Short delay to avoid busy looping

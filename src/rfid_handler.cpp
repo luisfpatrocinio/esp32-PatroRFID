@@ -31,6 +31,22 @@
 #include "rtos_comm.h"
 #include "config.h"
 
+
+// Build UID string from tag bytes
+String uidAsString(const MFRC522::Uid &uid){
+    String uidString = "";
+    for (byte i = 0; i < uid.size; i++)
+    {
+            uidString.concat(uid.uidByte[i] < 0x10 ? "0" : "");
+        uidString.concat(String(uid.uidByte[i], HEX));
+        if (i < uid.size - 1)
+            uidString.concat(":");
+    }
+    uidString.toUpperCase();
+
+    return uidString;
+}
+
 //==============================================================================
 // RFID READER TASK
 //==============================================================================
@@ -53,16 +69,7 @@ void rfidTask(void *parameter)
             // Check for new RFID tag and read its serial
             if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial())
             {
-                // Build UID string from tag bytes
-                String uidString = "";
-                for (byte i = 0; i < mfrc522.uid.size; i++)
-                {
-                    uidString.concat(mfrc522.uid.uidByte[i] < 0x10 ? "0" : "");
-                    uidString.concat(String(mfrc522.uid.uidByte[i], HEX));
-                    if (i < mfrc522.uid.size - 1)
-                        uidString.concat(":");
-                }
-                uidString.toUpperCase();
+                String uidString = uidAsString(mfrc522.uid);
 
                 // Avoid duplicate reads by checking lastUID
                 if (uidString != lastUID)
@@ -72,6 +79,9 @@ void rfidTask(void *parameter)
                     // Access the RFID tag's memory block before reading data
                     MFRC522::StatusCode status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, TRAILER_BLOCK, &key, &(mfrc522.uid));
 
+                    JsonDocument jsonDoc;
+                    jsonDoc["type"] = "readResult";
+
                     if (status == MFRC522::STATUS_OK)
                     {
                         // Read custom data from the specified block
@@ -79,17 +89,18 @@ void rfidTask(void *parameter)
                         byte bufferSize = sizeof(readBuffer);
                         status = mfrc522.MIFARE_Read(DATA_BLOCK, readBuffer, &bufferSize);
                         customData = (status == MFRC522::STATUS_OK) ? String((char *)readBuffer) : "Error reading data.";
+                        
+                        jsonDoc["content"]["status"] = "ok";
+                        jsonDoc["content"]["uid"] = uidString;
+                        jsonDoc["content"]["data"] = customData;
                     }
                     else
                     {
                         // Could not access tag memory block, cannot read data
-                        customData = "Tag access error.";
+                        jsonDoc["content"]["status"] = "error";
+                        jsonDoc["content"]["message"] = "Tag access error.";
+
                     }
-                    // Prepare JSON with 'type' and 'content' fields
-                    JsonDocument jsonDoc;
-                    jsonDoc["type"] = "readResult";
-                    jsonDoc["content"]["uid"] = uidString;
-                    jsonDoc["content"]["data"] = customData;
                     char jsonString[128];
                     serializeJson(jsonDoc, jsonString);
                     // Send JSON to BLE queue for notification
@@ -130,17 +141,19 @@ void rfidWriteTask(void *parameter)
             xSemaphoreGive(writeDataMutex);
         }
 
-        // Only proceed if in write mode and there is data to write
-        if (isWriteMode && localDataToRecord.length() > 0)
+        // Only proceed with reading if the button is pressed and in write mode
+        if (digitalRead(READ_BUTTON_PIN) == LOW && isWriteMode)
         {
             // Wait for a new RFID tag to be presented
             if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial())
             {
                 // Prepare feedback JSON for BLE notification
                 JsonDocument feedbackDoc;
-                feedbackDoc["type"] = "feedback";
-                Serial.println("Attempting to write data to RFID tag...");
+                feedbackDoc["type"] = "writeResult";
+                Serial.printf("Attempting to %s RFID tag...\n", localDataToRecord.length() > 0 ? "write data to" : "erase");
 
+                String uidString = uidAsString(mfrc522.uid);
+               
                 // Access the RFID tag's memory block before writing data
                 MFRC522::StatusCode status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, TRAILER_BLOCK, &key, &(mfrc522.uid));
 
@@ -157,7 +170,7 @@ void rfidWriteTask(void *parameter)
                     byte buffer[16] = {0};
                     strncpy((char *)buffer, localDataToRecord.c_str(), 15);
 
-                    Serial.println("Attempting to write data to RFID tag...");
+                    Serial.printf("Attempting to %s RFID tag...\n", localDataToRecord.length() > 0 ? "write data to" : "erasre");
 
                     // Write data to the specified block
                     status = mfrc522.MIFARE_Write(DATA_BLOCK, buffer, 16);
@@ -165,7 +178,8 @@ void rfidWriteTask(void *parameter)
                     {
                         // Write successful, signal buzzer for feedback
                         feedbackDoc["content"]["status"] = "ok";
-                        feedbackDoc["content"]["message"] = "Write successful: " + localDataToRecord;
+                        feedbackDoc["content"]["uid"] = uidString;
+                        feedbackDoc["content"]["data"] = localDataToRecord;
                         xSemaphoreGive(buzzerSemaphore);
                         Serial.println("Data written successfully to RFID tag.");
                     }

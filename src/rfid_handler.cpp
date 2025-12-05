@@ -89,10 +89,17 @@ void rfidTask(void *parameter)
                         byte bufferSize = sizeof(readBuffer);
                         status = mfrc522.MIFARE_Read(DATA_BLOCK, readBuffer, &bufferSize);
                         customData = (status == MFRC522::STATUS_OK) ? String((char *)readBuffer) : "Error reading data.";
-                        
-                        jsonDoc["content"]["status"] = "ok";
-                        jsonDoc["content"]["uid"] = uidString;
-                        jsonDoc["content"]["data"] = customData;
+
+                        if(customData == "Error reading data."){
+                            jsonDoc["content"]["status"] = "error";
+                            jsonDoc["content"]["message"] = customData;
+                        }
+
+                        else{
+                            jsonDoc["content"]["status"] = "ok";
+                            jsonDoc["content"]["uid"] = uidString;
+                            jsonDoc["content"]["data"] = customData;
+                        }
                     }
                     else
                     {

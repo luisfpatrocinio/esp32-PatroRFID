@@ -6,7 +6,7 @@
  * @file rfid_handler.cpp
  * @author Luis Felipe Patrocinio
  * @brief Implementation of RFID reading and writing tasks.
- * @date 2025-09-01
+ * @date 2026-01-26
  */
 
 #include "rfid_handler.h"
@@ -36,7 +36,8 @@
 //==============================================================================
 void rfidTask(void *parameter)
 {
-    String lastUID = "";
+    String lastEPC = "";
+    R200Tag readTag;
     for (;;)
     {
         // Check if the system is in write mode (protected by mutex)
@@ -47,66 +48,70 @@ void rfidTask(void *parameter)
             xSemaphoreGive(writeDataMutex);
         }
 
-        // Only proceed with reading if the button is pressed and not in write mode
+        // LOGIC: If button is pressed, send read command (Poll)
         if (digitalRead(READ_BUTTON_PIN) == LOW && !isWriteMode)
         {
-            // Check for new RFID tag and read its serial
-            if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial())
+            // Send single read command
+            rfid.singlePoll();
+
+            // Time window to process incoming data (150ms timeout)
+            unsigned long startTime = millis();
+            bool tagFound = false;
+            while (millis() - startTime < 150)
             {
-                // Build UID string from tag bytes
-                String uidString = "";
-                for (byte i = 0; i < mfrc522.uid.size; i++)
+                // Process incoming data
+                if (rfid.processIncomingData(readTag))
                 {
-                    uidString.concat(mfrc522.uid.uidByte[i] < 0x10 ? "0" : "");
-                    uidString.concat(String(mfrc522.uid.uidByte[i], HEX));
-                    if (i < mfrc522.uid.size - 1)
-                        uidString.concat(":");
+                    tagFound = true;
+                    break; // Exit loop if tag is found
                 }
-                uidString.toUpperCase();
+                vTaskDelay(pdMS_TO_TICKS(5)); // Let FreeRTOS manage other tasks while waiting
+            }
 
-                // Avoid duplicate reads by checking lastUID
-                if (uidString != lastUID)
+            if (tagFound)
+            {
+                // Simple filter to avoid duplicate reads
+                if (readTag.epc != lastEPC)
                 {
-                    lastUID = uidString;
-                    String customData = "";
-                    // Access the RFID tag's memory block before reading data
-                    MFRC522::StatusCode status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, TRAILER_BLOCK, &key, &(mfrc522.uid));
+                    lastEPC = readTag.epc;
 
-                    if (status == MFRC522::STATUS_OK)
-                    {
-                        // Read custom data from the specified block
-                        byte readBuffer[18];
-                        byte bufferSize = sizeof(readBuffer);
-                        status = mfrc522.MIFARE_Read(DATA_BLOCK, readBuffer, &bufferSize);
-                        customData = (status == MFRC522::STATUS_OK) ? String((char *)readBuffer) : "Error reading data.";
-                    }
-                    else
-                    {
-                        // Could not access tag memory block, cannot read data
-                        customData = "Tag access error.";
-                    }
-                    // Prepare JSON with 'type' and 'content' fields
-                    JsonDocument jsonDoc;
-                    jsonDoc["type"] = "readResult";
-                    jsonDoc["content"]["uid"] = uidString;
-                    jsonDoc["content"]["data"] = customData;
-                    char jsonString[128];
-                    serializeJson(jsonDoc, jsonString);
-                    // Send JSON to BLE queue for notification
+                    // Prepare JSON document
+                    JsonDocument doc;
+                    doc["type"] = "readResult";
+                    doc["content"]["uid"] = readTag.epc;
+
+                    // Note: The actual driver only reads EPC (ID)
+                    // For read memory functionality, additional implementation is needed on R200Driver
+                    doc["content"]["rssi"] = readTag.rssi;
+                    doc["content"]["data"] = "EPC Gen2 Data"; // Placeholder
+
+                    // Serialize JSON to string
+                    char jsonString[256];
+                    serializeJson(doc, jsonString);
+
+                    // Send JSON data to BLE queue
                     xQueueSend(jsonDataQueue, &jsonString, (TickType_t)10);
-                    // Signal buzzer task for feedback
                     xSemaphoreGive(buzzerSemaphore);
+
+                    Serial.print("Tag UHF Detectada: ");
+                    Serial.println(readTag.epc);
                 }
-                // Halt communication with card and stop encryption
-                mfrc522.PICC_HaltA();
-                mfrc522.PCD_StopCrypto1();
             }
         }
         else
         {
-            // Reset lastUID if button is not pressed or in write mode
-            lastUID = "";
+            // Reset lastEPC if button is not pressed or in write mode
+            lastEPC = "";
+
+            if (Serial2.available())
+            {
+                // It is important to continue processing residual data that may arrive at the Serial port
+                // to keep the buffer clean, even without actively "requesting" a read.
+                R200Tag dummy;
+                rfid.processIncomingData(dummy);
+            }
         }
+
         // Short delay to avoid busy looping
         vTaskDelay(pdMS_TO_TICKS(50));
     }
@@ -119,6 +124,7 @@ void rfidWriteTask(void *parameter)
 {
     for (;;)
     {
+        /*
         // Check write mode and get data to record (protected by mutex)
         bool isWriteMode;
         String localDataToRecord;
@@ -188,6 +194,7 @@ void rfidWriteTask(void *parameter)
                 mfrc522.PCD_StopCrypto1();
             }
         }
+        */
         // Short delay to avoid busy looping
         vTaskDelay(pdMS_TO_TICKS(50));
     }

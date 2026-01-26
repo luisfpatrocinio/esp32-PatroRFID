@@ -5,8 +5,8 @@
  * @file main.cpp
  * @author Luis Felipe Patrocinio (https://www.github.com/luisfpatrocinio)
  * @brief Main firmware file for the Handheld RFID Reader. Initializes modules and starts FreeRTOS tasks.
- * @version 3.0
- * @date 2025-08-26
+ * @version 4.0
+ * @date 2026-01-26
  */
 
 //==============================================================================
@@ -17,7 +17,6 @@
 // Arduino & ESP32 Includes
 //==============================================================================
 #include <Arduino.h>
-#include <SPI.h>
 
 //==============================================================================
 // Project Header Includes
@@ -27,13 +26,16 @@
 #include "ble_comm.h"
 #include "rfid_handler.h"
 #include "ui_handler.h"
+#include "R200.h"
 
 //======================='=======================================================
 // GLOBAL OBJECTS & CONSTANTS (DEFINITIONS)
 //==============================================================================
 const char *DEVICE_ID = "PatroRFID-Reader";
-MFRC522 mfrc522(SS_PIN, RST_PIN);
-MFRC522::MIFARE_Key key;
+
+// Initialize R200 RFID driver
+R200Driver rfid(Serial2);
+
 BLECharacteristic *pCharacteristic = nullptr;
 
 //==============================================================================
@@ -85,7 +87,11 @@ void setup()
 
     // --- Task Creation ---
     xTaskCreatePinnedToCore(rfidTask, "RFID_Task", 4096, NULL, 2, NULL, 1);
-    xTaskCreatePinnedToCore(rfidWriteTask, "RFID_Write_Task", 4096, NULL, 2, NULL, 1);
+
+    // @TODO
+    // xTaskCreatePinnedToCore(rfidWriteTask, "RFID_Write_Task", 4096, NULL, 2, NULL, 1);
+    Serial.println("Writing task deactivated temporarily.");
+
     xTaskCreatePinnedToCore(bluetoothTask, "Bluetooth_Task", 4096, NULL, 1, NULL, 1);
     xTaskCreatePinnedToCore(buzzerTask, "Buzzer_Task", 1024, NULL, 1, NULL, 1);
     xTaskCreatePinnedToCore(ledTask, "LED_Task", 2048, NULL, 1, NULL, 1);

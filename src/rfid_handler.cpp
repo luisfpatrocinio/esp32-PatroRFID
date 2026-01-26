@@ -38,6 +38,10 @@ void rfidTask(void *parameter)
 {
     String lastEPC = "";
     R200Tag readTag;
+
+    // Variable to control the time between beeps for the same tag (optional)
+    unsigned long lastBeepTime = 0;
+
     for (;;)
     {
         // Check if the system is in write mode (protected by mutex)
@@ -54,54 +58,61 @@ void rfidTask(void *parameter)
             // Send single read command
             rfid.singlePoll();
 
-            // Time window to process incoming data (150ms timeout)
+            // Time window to process incoming data (60ms timeout)
             unsigned long startTime = millis();
-            bool tagFound = false;
-            while (millis() - startTime < 150)
+
+            while (millis() - startTime < 60)
             {
                 // Process incoming data
                 if (rfid.processIncomingData(readTag))
                 {
-                    tagFound = true;
-                    break; // Exit loop if tag is found
+                    // --- FILTERING AND SENDING DATA ---
+                    // If it is a new tag OR if enough time has passed (e.g., reset of the same tag)
+                    // In UHF mode, as we read many times per second, it is CRUCIAL to filter.
+                    // Here we filter: Only notify if the EPC has changed from the last one read IMMEDIATELY before.
+
+                    if (readTag.epc != lastEPC)
+                    {
+                        lastEPC = readTag.epc;
+                        lastBeepTime = millis();
+
+                        // Prepare JSON document
+                        JsonDocument jsonDoc;
+                        jsonDoc["type"] = "readResult";
+                        jsonDoc["content"]["uid"] = readTag.epc;
+                        jsonDoc["content"]["rssi"] = readTag.rssi;
+                        jsonDoc["content"]["data"] = "EPC Gen2 Data"; // Placeholder
+
+                        // Serialize JSON to string
+                        char jsonString[256];
+                        serializeJson(jsonDoc, jsonString);
+
+                        // Send JSON data to BLE queue
+                        xQueueSend(jsonDataQueue, &jsonString, (TickType_t)5);
+
+                        // Signal buzzer for feedback
+                        xSemaphoreGive(buzzerSemaphore);
+
+                        Serial.print("Tag UHF Detectada: ");
+                        Serial.println(readTag.epc);
+                    }
+                    else
+                    {
+                        // Efeito Ghost: If the same tag is read again after some time, we can still give feedback
+                    }
                 }
-                vTaskDelay(pdMS_TO_TICKS(5)); // Let FreeRTOS manage other tasks while waiting
-            }
-
-            if (tagFound)
-            {
-                // Simple filter to avoid duplicate reads
-                if (readTag.epc != lastEPC)
-                {
-                    lastEPC = readTag.epc;
-
-                    // Prepare JSON document
-                    JsonDocument doc;
-                    doc["type"] = "readResult";
-                    doc["content"]["uid"] = readTag.epc;
-
-                    // Note: The actual driver only reads EPC (ID)
-                    // For read memory functionality, additional implementation is needed on R200Driver
-                    doc["content"]["rssi"] = readTag.rssi;
-                    doc["content"]["data"] = "EPC Gen2 Data"; // Placeholder
-
-                    // Serialize JSON to string
-                    char jsonString[256];
-                    serializeJson(doc, jsonString);
-
-                    // Send JSON data to BLE queue
-                    xQueueSend(jsonDataQueue, &jsonString, (TickType_t)10);
-                    xSemaphoreGive(buzzerSemaphore);
-
-                    Serial.print("Tag UHF Detectada: ");
-                    Serial.println(readTag.epc);
-                }
+                // Small delay to avoid crashing the CPU and allow the UART buffer to fill up
+                vTaskDelay(pdMS_TO_TICKS(2));
             }
         }
         else
         {
             // Reset lastEPC if button is not pressed or in write mode
-            lastEPC = "";
+            if (lastEPC != "")
+            {
+                lastEPC = "";
+                Serial.println("--- Paused Reading (Trigger Released) ---");
+            }
 
             if (Serial2.available())
             {

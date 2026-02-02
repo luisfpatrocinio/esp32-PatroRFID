@@ -6,7 +6,7 @@
  * @file rfid_handler.cpp
  * @author Luis Felipe Patrocinio
  * @brief Implementation of RFID reading and writing tasks.
- * @date 2025-09-01
+ * @date 2026-01-26
  */
 
 #include "rfid_handler.h"
@@ -36,7 +36,12 @@
 //==============================================================================
 void rfidTask(void *parameter)
 {
-    String lastUID = "";
+    String lastEPC = "";
+    R200Tag readTag;
+
+    // Variable to control the time between beeps for the same tag (optional)
+    unsigned long lastBeepTime = 0;
+
     for (;;)
     {
         // Check if the system is in write mode (protected by mutex)
@@ -47,66 +52,77 @@ void rfidTask(void *parameter)
             xSemaphoreGive(writeDataMutex);
         }
 
-        // Only proceed with reading if the button is pressed and not in write mode
+        // LOGIC: If button is pressed, send read command (Poll)
         if (digitalRead(READ_BUTTON_PIN) == LOW && !isWriteMode)
         {
-            // Check for new RFID tag and read its serial
-            if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial())
+            // Send single read command
+            rfid.singlePoll();
+
+            // Time window to process incoming data (60ms timeout)
+            unsigned long startTime = millis();
+
+            while (millis() - startTime < 60)
             {
-                // Build UID string from tag bytes
-                String uidString = "";
-                for (byte i = 0; i < mfrc522.uid.size; i++)
+                // Process incoming data
+                if (rfid.processIncomingData(readTag))
                 {
-                    uidString.concat(mfrc522.uid.uidByte[i] < 0x10 ? "0" : "");
-                    uidString.concat(String(mfrc522.uid.uidByte[i], HEX));
-                    if (i < mfrc522.uid.size - 1)
-                        uidString.concat(":");
-                }
-                uidString.toUpperCase();
+                    // --- FILTERING AND SENDING DATA ---
+                    // If it is a new tag OR if enough time has passed (e.g., reset of the same tag)
+                    // In UHF mode, as we read many times per second, it is CRUCIAL to filter.
+                    // Here we filter: Only notify if the EPC has changed from the last one read IMMEDIATELY before.
 
-                // Avoid duplicate reads by checking lastUID
-                if (uidString != lastUID)
-                {
-                    lastUID = uidString;
-                    String customData = "";
-                    // Access the RFID tag's memory block before reading data
-                    MFRC522::StatusCode status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, TRAILER_BLOCK, &key, &(mfrc522.uid));
-
-                    if (status == MFRC522::STATUS_OK)
+                    if (readTag.epc != lastEPC)
                     {
-                        // Read custom data from the specified block
-                        byte readBuffer[18];
-                        byte bufferSize = sizeof(readBuffer);
-                        status = mfrc522.MIFARE_Read(DATA_BLOCK, readBuffer, &bufferSize);
-                        customData = (status == MFRC522::STATUS_OK) ? String((char *)readBuffer) : "Error reading data.";
+                        lastEPC = readTag.epc;
+                        lastBeepTime = millis();
+
+                        // Prepare JSON document
+                        JsonDocument jsonDoc;
+                        jsonDoc["type"] = "readResult";
+                        jsonDoc["content"]["uid"] = readTag.epc;
+                        jsonDoc["content"]["rssi"] = readTag.rssi;
+                        jsonDoc["content"]["data"] = "EPC Gen2 Data"; // Placeholder
+
+                        // Serialize JSON to string
+                        char jsonString[256];
+                        serializeJson(jsonDoc, jsonString);
+
+                        // Send JSON data to BLE queue
+                        xQueueSend(jsonDataQueue, &jsonString, (TickType_t)5);
+
+                        // Signal buzzer for feedback
+                        xSemaphoreGive(buzzerSemaphore);
+
+                        Serial.print("Tag UHF Detectada: ");
+                        Serial.println(readTag.epc);
                     }
                     else
                     {
-                        // Could not access tag memory block, cannot read data
-                        customData = "Tag access error.";
+                        // Efeito Ghost: If the same tag is read again after some time, we can still give feedback
                     }
-                    // Prepare JSON with 'type' and 'content' fields
-                    JsonDocument jsonDoc;
-                    jsonDoc["type"] = "readResult";
-                    jsonDoc["content"]["uid"] = uidString;
-                    jsonDoc["content"]["data"] = customData;
-                    char jsonString[128];
-                    serializeJson(jsonDoc, jsonString);
-                    // Send JSON to BLE queue for notification
-                    xQueueSend(jsonDataQueue, &jsonString, (TickType_t)10);
-                    // Signal buzzer task for feedback
-                    xSemaphoreGive(buzzerSemaphore);
                 }
-                // Halt communication with card and stop encryption
-                mfrc522.PICC_HaltA();
-                mfrc522.PCD_StopCrypto1();
+                // Small delay to avoid crashing the CPU and allow the UART buffer to fill up
+                vTaskDelay(pdMS_TO_TICKS(2));
             }
         }
         else
         {
-            // Reset lastUID if button is not pressed or in write mode
-            lastUID = "";
+            // Reset lastEPC if button is not pressed or in write mode
+            if (lastEPC != "")
+            {
+                lastEPC = "";
+                Serial.println("--- Paused Reading (Trigger Released) ---");
+            }
+
+            if (Serial2.available())
+            {
+                // It is important to continue processing residual data that may arrive at the Serial port
+                // to keep the buffer clean, even without actively "requesting" a read.
+                R200Tag dummy;
+                rfid.processIncomingData(dummy);
+            }
         }
+
         // Short delay to avoid busy looping
         vTaskDelay(pdMS_TO_TICKS(50));
     }
@@ -119,6 +135,7 @@ void rfidWriteTask(void *parameter)
 {
     for (;;)
     {
+        /*
         // Check write mode and get data to record (protected by mutex)
         bool isWriteMode;
         String localDataToRecord;
@@ -188,6 +205,7 @@ void rfidWriteTask(void *parameter)
                 mfrc522.PCD_StopCrypto1();
             }
         }
+        */
         // Short delay to avoid busy looping
         vTaskDelay(pdMS_TO_TICKS(50));
     }

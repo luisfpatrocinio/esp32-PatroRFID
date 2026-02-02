@@ -2,7 +2,7 @@
  * @file rtos_comm.h
  * @author Luis Felipe Patrocinio
  * @brief Extern declarations for global variables and FreeRTOS primitives.
- * @date 2025-08-26
+ * @date 2026-01-26
  *
  * @note This header acts as a central point of communication between different
  *       software modules, ensuring they share the same global state and RTOS handles.
@@ -15,15 +15,14 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
-#include <MFRC522.h>
 #include <BLECharacteristic.h>
+#include "R200.h"
 
 //==============================================================================
 // GLOBAL OBJECTS
 //==============================================================================
-extern MFRC522 mfrc522;                    ///< Global instance of the MFRC522 RFID reader.
-extern MFRC522::MIFARE_Key key;            ///< Global MIFARE key for card authentication.
-extern BLECharacteristic *pCharacteristic; ///< Global pointer to the BLE characteristic.
+extern R200Driver rfid;                     ///< Global instance of the R200 RFID driver.
+extern BLECharacteristic *pCharacteristic;  ///< Global pointer to the BLE characteristic.
 
 //==============================================================================
 // GLOBAL STATE VARIABLES

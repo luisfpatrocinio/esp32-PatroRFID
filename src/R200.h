@@ -92,6 +92,16 @@ public:
      */
     bool processIncomingData(R200Tag &outputTag);
 
+    /**
+     * @brief Escreve um novo código EPC na etiqueta.
+     * @note A etiqueta deve estar próxima da antena. Cuidado para não ter várias tags perto!
+     *
+     * @param newEPC String hexadecimal com o novo ID (ex: "E2001122").
+     * Deve ter numero par de caracteres (múltiplo de 4 é ideal).
+     * @param password Senha de acesso (Padrão é "00000000").
+     */
+    void writeEPC(String newEPC, String password = "00000000");
+
 private:
     HardwareSerial &_serial; ///< Referência para a instância da Serial física.
     uint8_t _buffer[256];    ///< Buffer circular para remontagem de pacotes.
@@ -130,6 +140,11 @@ private:
      * @param tag Referência para a estrutura onde os dados serão salvos.
      */
     void parsePacket(uint8_t *packet, int length, R200Tag &tag);
+
+    /**
+     * @brief Converte um caractere Hex (0-9, A-F) para valor numérico (0-15).
+     */
+    uint8_t hexCharToByte(char c);
 };
 
 #endif // R200_H

@@ -92,9 +92,7 @@ bool R200Driver::processIncomingData(R200Tag &outputTag)
     {
         uint8_t b = _serial.read();
 
-        // 1. Sincronização de Frame
-        // Se estamos no início do buffer e o byte não é o Cabeçalho (0xAA),
-        // descartamos (ruído).
+        // 1. Sincronização (Ignora ruído inicial)
         if (_bufferIndex == 0 && b != FRAME_HEAD)
         {
             continue;
@@ -104,25 +102,41 @@ bool R200Driver::processIncomingData(R200Tag &outputTag)
         _buffer[_bufferIndex++] = b;
 
         // 3. Verificação de Fim de Pacote
-        // Um pacote mínimo tem 7 bytes (AA, Type, Cmd, PL_H, PL_L, CS, DD)
         if (b == FRAME_END && _bufferIndex >= 7)
         {
-
-            // Verifica o comando recebido (Byte índice 2)
             uint8_t cmd = _buffer[2];
             uint8_t type = _buffer[1];
 
-            // 0x22 = Resposta do Single Poll
-            // Type 0x02 = Notification Frame (significa que encontrou dados)
+            // --- ROTEAMENTO DE PACOTES ---
+
+            // CASO 1: Leitura de Tag (Sucesso)
             if (cmd == 0x22 && type == 0x02)
             {
                 parsePacket(_buffer, _bufferIndex, outputTag);
-                _bufferIndex = 0; // Reseta buffer para próximo pacote
-                return true;      // Sucesso
+                _bufferIndex = 0; // Limpa para o próximo
+                return true;      // Avisa o main que tem Tag nova!
             }
+            // CASO 2: Confirmação de Escrita
+            else if (cmd == 0x49)
+            {
+                Serial.println("[R200] Escrita realizada com SUCESSO!");
+            }
+            // CASO 3: Erro (Leitura ou Escrita)
+            else if (cmd == 0xFF)
+            {
+                uint8_t errCode = _buffer[5];
+                Serial.print("[R200] Erro: 0x");
+                Serial.println(errCode, HEX);
 
-            // Debug: Resposta de Versão de Hardware (0x03)
-            if (cmd == 0x03)
+                if (errCode == 0x16)
+                    Serial.println("-> Acesso Negado (Senha incorreta ou Bloqueada)");
+                if (errCode == 0x10)
+                    Serial.println("-> Falha (Tag longe ou inexistente)");
+                if (errCode == 0x15)
+                    Serial.println("-> Nenhuma tag detectada no Poll");
+            }
+            // CASO 4: Info de Hardware
+            else if (cmd == 0x03)
             {
                 Serial.print("[DEBUG] Hardware Info RAW: ");
                 for (int i = 0; i < _bufferIndex; i++)
@@ -130,16 +144,16 @@ bool R200Driver::processIncomingData(R200Tag &outputTag)
                 Serial.println();
             }
 
-            // Se chegou um 0xDD mas não era o que queríamos, ou pacote processado,
-            // limpa buffer.
+            // Reset final do buffer para qualquer pacote processado (que não retornou antes)
             _bufferIndex = 0;
         }
 
-        // Proteção contra Overflow do Buffer
+        // Proteção Overflow
         if (_bufferIndex >= 256)
             _bufferIndex = 0;
     }
-    return false; // Nada pronto ainda
+
+    return false; // Nenhuma tag lida neste ciclo
 }
 
 void R200Driver::parsePacket(uint8_t *pkt, int length, R200Tag &tag)
@@ -180,4 +194,71 @@ void R200Driver::parsePacket(uint8_t *pkt, int length, R200Tag &tag)
     }
     tag.epc.toUpperCase(); // Padronização visual
     tag.valid = true;
+}
+
+uint8_t R200Driver::hexCharToByte(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    return 0;
+}
+
+void R200Driver::writeEPC(String newEPC, String password)
+{
+    // 1. Validação Básica
+    // O EPC deve ter tamanho par (bytes completos) e idealmente múltiplo de 4 (words)
+    if (newEPC.length() % 4 != 0)
+    {
+        Serial.println("[Erro] O EPC deve ter comprimento multiplo de 4 caracteres (Ex: 1122, AABBCCDD)");
+        return;
+    }
+
+    // 2. Preparação dos Parâmetros do Comando 0x49
+    // Estrutura: [Pass(4)] + [MemBank(1)] + [StartAddr(2)] + [DataLen(2)] + [Data(N)]
+
+    int dataBytes = newEPC.length() / 2;           // Quantos bytes de dados reais
+    int wordCount = dataBytes / 2;                 // Quantas "Words" de 16 bits
+    int totalParamLen = 4 + 1 + 2 + 2 + dataBytes; // Tamanho total do payload
+
+    uint8_t params[64];
+    int idx = 0;
+
+    // A. Password (4 Bytes) - Padrão 00 00 00 00
+    // (Aqui simplificado, convertendo a string de senha se necessario, ou fixo 0)
+    uint32_t pwd = strtoul(password.c_str(), NULL, 16);
+    params[idx++] = (pwd >> 24) & 0xFF;
+    params[idx++] = (pwd >> 16) & 0xFF;
+    params[idx++] = (pwd >> 8) & 0xFF;
+    params[idx++] = pwd & 0xFF;
+
+    // B. Memory Bank (1 Byte)
+    // 0x01 = Banco EPC
+    params[idx++] = 0x01;
+
+    // C. Start Address (2 Bytes)
+    // Começamos no endereço 2 (pulamos CRC e PC)
+    params[idx++] = 0x00;
+    params[idx++] = 0x02;
+
+    // D. Data Length (2 Bytes) - Quantidade de WORDS
+    params[idx++] = (wordCount >> 8) & 0xFF;
+    params[idx++] = wordCount & 0xFF;
+
+    // E. Dados (O novo EPC)
+    // Converte a String Hex em Bytes Reais
+    for (int i = 0; i < newEPC.length(); i += 2)
+    {
+        uint8_t high = hexCharToByte(newEPC[i]);
+        uint8_t low = hexCharToByte(newEPC[i + 1]);
+        params[idx++] = (high << 4) | low;
+    }
+
+    // 3. Envia o comando
+    // Type=00, Cmd=0x49 (Write)
+    sendCommand(0x00, 0x49, params, idx);
+    Serial.println("Comando de Escrita Enviado...");
 }

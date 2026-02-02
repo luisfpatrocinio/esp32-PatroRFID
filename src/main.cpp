@@ -65,10 +65,11 @@ void setup()
     pinMode(BUZZER_PIN, OUTPUT);
     pinMode(LED_PIN, OUTPUT);
     pinMode(READ_BUTTON_PIN, INPUT_PULLUP);
-    SPI.begin();
-    mfrc522.PCD_Init();
-    for (byte i = 0; i < 6; i++)
-        key.keyByte[i] = 0xFF;
+
+    Serial.println("Inicializando Módulo R200...");
+    rfid.begin();
+    rfid.getHardwareVersion(); // Health Check
+
     Serial.println("Peripherals initialized.");
 
     // --- RTOS Primitives Initialization ---

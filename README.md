@@ -109,44 +109,24 @@ Provides the data to be written to the next tag presented (must be in write mode
 
 Enables or disables the audible buzzer feedback.
 
-```json
+````json
 {
   "type": "toggleSound",
   "content": "off"
 }
-```
-
-- `content` can be `"on"` or `"off"`.
+```*   `content` can be `"on"` or `"off"`.
 
 ### Device → Client (Responses & Data)
 
 #### 1. RFID Read Result
-
-Sent after a read attempt is made.
-
-- **Success:**
-
-  ```json
-  {
-    "type": "readResult",
-    "content": {
-      "status": "ok",
-      "uid": "A1:B2:C3:D4",
-      "data": "Contents of Tag"
-    }
-  }
-  ```
-
-- **Failure:**
-  ```json
-  {
-    "type": "readResult",
-    "content": {
-      "status": "error",
-      "message": "Tag access error"
-    }
-  }
-  ```
+Sent when a tag is successfully read.
+```json
+{
+  "type": "readResult",
+  "uid": "A1:B2:C3:D4",
+  "data": "Contents of Tag"
+}
+````
 
 #### 2. RFID Write Result
 
@@ -158,8 +138,7 @@ Sent after a write attempt is made.
     "type": "writeResult",
     "content": {
       "status": "ok",
-      "uid": "A1:B2:C3:D4",
-      "data": "Contents writed on Tag"
+      "message": "Write successful"
     }
   }
   ```

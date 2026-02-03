@@ -19,4 +19,10 @@ void setupBLE();
  */
 void bluetoothTask(void *parameter);
 
+/**
+ * @brief FreeRTOS task to handle OTA update states and Flash writing.
+ * @param parameter Unused task parameter.
+ */
+void otaTask(void *parameter);
+
 #endif // BLE_COMM_H

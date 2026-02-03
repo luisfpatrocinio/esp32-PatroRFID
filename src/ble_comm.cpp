@@ -1,7 +1,7 @@
 /**
  * @file ble_comm.cpp
  * @author Luis Felipe Patrocinio
- * @brief Implementation of BLE communication setup, callbacks, and task.
+ * @brief Implementation of BLE communication setup, callbacks, task and OTA.
  * @date 2025-09-01
  */
 
@@ -9,11 +9,16 @@
 // Arduino & ESP32 Includes
 //==============================================================================
 #include <ArduinoJson.h>
+#include <Update.h>
+#include "FS.h"
+#include "SPIFFS.h"
 
 //==============================================================================
 // Project Header Includes
 //==============================================================================
 #include "config.h"
+#include "ble_comm.h"
+#include "rtos_comm.h"
 
 //==============================================================================
 // BLE Library Includes
@@ -24,53 +29,153 @@
 #include <BLE2902.h>
 
 //==============================================================================
-// Project Header Includes
-//==============================================================================
-#include "ble_comm.h"
-#include "rtos_comm.h"
-
-//==============================================================================
-// DEFINITIONS
+// APP DEFINITIONS
 //==============================================================================
 #define SERVICE_UUID "12345678-1234-1234-1234-1234567890ab"
 #define CHARACTERISTIC_UUID "abcdefab-1234-5678-1234-abcdefabcdef"
-extern const char *DEVICE_ID; // Use the device ID from main.cpp
+#define VERSION_CHARACTERISTIC_UUID "E04A98F1-3B9A-4692-9122-57031CA11EE0"
 
-// BLE server pointer
+//==============================================================================
+// OTA DEFINITIONS & VARS
+//==============================================================================
+#define OTA_SERVICE_UUID           "fb1e4001-54ae-4a28-9f74-dfccb248601d"
+#define OTA_CHARACTERISTIC_UUID_RX "fb1e4002-54ae-4a28-9f74-dfccb248601d"
+#define OTA_CHARACTERISTIC_UUID_TX "fb1e4003-54ae-4a28-9f74-dfccb248601d"
+
+#define NORMAL_MODE   0
+#define UPDATE_MODE   1
+#define OTA_MODE      2
+
+// OTA Globals
+static BLECharacteristic *pOtaCharacteristicTX;
+static BLECharacteristic *pOtaCharacteristicRX;
+static bool sendMode = false, sendSize = true;
+static bool writeFile = false, request = false;
+static int writeLen = 0, writeLen2 = 0;
+static bool current = true;
+static int parts = 0, next = 0, cur = 0, MTU = 0;
+static int OTA_STATE = NORMAL_MODE;
+unsigned long rParts, tParts;
+uint8_t updater[16384];
+uint8_t updater2[16384];
+
+#define FLASH SPIFFS
+#define FASTMODE false 
+
+extern const char *DEVICE_ID;
 static BLEServer *pServer = nullptr;
 
 //==============================================================================
-// BLE SERVER CALLBACKS
+// HELPERS FOR OTA
+//==============================================================================
+static void rebootEspWithReason(String reason) {
+    Serial.println(reason);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    ESP.restart();
+}
+
+static void writeBinary(fs::FS &fs, const char *path, uint8_t *dat, int len) {
+    File file = fs.open(path, FILE_APPEND);
+    if (!file) {
+        Serial.println("- failed to open file for writing");
+        return;
+    }
+    file.write(dat, len);
+    file.close();
+    writeFile = false;
+    rParts += len;
+}
+
+void sendOtaResult(String result) {
+    pOtaCharacteristicTX->setValue(result.c_str());
+    pOtaCharacteristicTX->notify();
+    vTaskDelay(pdMS_TO_TICKS(200));
+}
+
+void performUpdate(Stream &updateSource, size_t updateSize) {
+    String result = "0F"; // Hex string simulation
+    if (Update.begin(updateSize)) {
+        size_t written = Update.writeStream(updateSource);
+        if (written == updateSize) {
+            Serial.println("Written : " + String(written) + " successfully");
+        } else {
+            Serial.println("Written only : " + String(written) + "/" + String(updateSize) + ". Retry?");
+        }
+        if (Update.end()) {
+            Serial.println("OTA done!");
+            if (Update.isFinished()) {
+                Serial.println("Update successfully completed. Rebooting...");
+                result = "Success!";
+            } else {
+                Serial.println("Update not finished? Something went wrong!");
+                result = "Failed!";
+            }
+        } else {
+            Serial.println("Error Occurred. Error #: " + String(Update.getError()));
+            result = "Error #: " + String(Update.getError());
+        }
+    } else {
+        Serial.println("Not enough space to begin OTA");
+        result = "Not enough space for OTA";
+    }
+    if (bluetoothConnected) {
+        sendOtaResult(result);
+        vTaskDelay(pdMS_TO_TICKS(5000));
+    }
+}
+
+void updateFromFS(fs::FS &fs) {
+    File updateBin = fs.open("/update.bin");
+    if (updateBin) {
+        if (updateBin.isDirectory()) {
+            Serial.println("Error, update.bin is not a file");
+            updateBin.close();
+            return;
+        }
+        size_t updateSize = updateBin.size();
+        if (updateSize > 0) {
+            Serial.println("Trying to start update");
+            performUpdate(updateBin, updateSize);
+        } else {
+            Serial.println("Error, file is empty");
+        }
+        updateBin.close();
+        Serial.println("Removing update file");
+        fs.remove("/update.bin");
+        rebootEspWithReason("Rebooting to complete OTA update");
+    } else {
+        Serial.println("Could not load update.bin from spiffs root");
+    }
+}
+
+//==============================================================================
+// BLE SERVER CALLBACKS (APP + OTA)
 //==============================================================================
 class MyServerCallbacks : public BLEServerCallbacks
 {
     void onConnect(BLEServer *server) override
     {
-        // Set the global flag to indicate BLE client is connected
         bluetoothConnected = true;
         Serial.println("BLE Client Connected.");
     }
 
     void onDisconnect(BLEServer *server) override
     {
-        // Clear the global flag when BLE client disconnects
         bluetoothConnected = false;
         Serial.println("BLE Client Disconnected.");
-        // Restart advertising so new clients can connect
-        BLEDevice::startAdvertising(); // Keep advertising
+        BLEDevice::startAdvertising(); 
     }
 };
 
 //==============================================================================
-// BLE CHARACTERISTIC CALLBACKS
+// BLE CHARACTERISTIC CALLBACKS (APP - JSON)
 //==============================================================================
-class MyCallbacks : public BLECharacteristicCallbacks
+class AppCallbacks : public BLECharacteristicCallbacks
 {
     void onWrite(BLECharacteristic *characteristic) override
     {
         std::string rxValue = characteristic->getValue();
-        if (rxValue.empty())
-            return;
+        if (rxValue.empty()) return;
 
         Serial.print("Received over BLE: ");
         Serial.println(rxValue.c_str());
@@ -78,84 +183,134 @@ class MyCallbacks : public BLECharacteristicCallbacks
         String received = String(rxValue.c_str());
         received.trim();
 
-        // Parse the received JSON string
         JsonDocument doc;
         DeserializationError error = deserializeJson(doc, received);
 
         JsonDocument feedbackDoc;
         String feedbackJson;
 
-        if (error)
-        {
-            // If JSON is invalid, prepare error feedback
+        if (error) {
             feedbackDoc["type"] = "feedback";
             feedbackDoc["content"]["status"] = "error";
             feedbackDoc["content"]["message"] = "Invalid JSON received";
-        }
-        else
-        {
+        } else {
             const char *type = doc["type"];
             const char *content = doc["content"];
 
-            // Protect shared state with mutex before handling commands
-            if (xSemaphoreTake(writeDataMutex, portMAX_DELAY) == pdTRUE)
-            {
-                // Handle mode change command
-                if (type && strcmp(type, "changeMode") == 0)
-                {
-                    if (content && strcmp(content, "write") == 0)
-                    {
-                        // Enable write mode and clear previous data
+            if (xSemaphoreTake(writeDataMutex, portMAX_DELAY) == pdTRUE) {
+                if (type && strcmp(type, "changeMode") == 0) {
+                    if (content && strcmp(content, "write") == 0) {
                         writeMode = true;
                         dataToRecord = "";
                         feedbackDoc["content"]["mode"] = "write";
                         feedbackDoc["content"]["message"] = "Write mode activated";
-                    }
-                    else if (content && strcmp(content, "stop") == 0)
-                    {
-                        // Disable write mode and clear previous data
+                    } else if (content && strcmp(content, "stop") == 0) {
                         writeMode = false;
                         dataToRecord = "";
                         feedbackDoc["content"]["mode"] = "read";
                         feedbackDoc["content"]["message"] = "Write mode stopped";
                     }
-                }
-                // Handle data to be written to RFID tag
-                else if (type && strcmp(type, "writeData") == 0 && writeMode)
-                {
+                } else if (type && strcmp(type, "writeData") == 0 && writeMode) {
                     dataToRecord = String(content);
                     feedbackDoc["content"]["message"] = "Data for writing received";
                     feedbackDoc["content"]["data"] = dataToRecord;
-                }
-                // Handle sound toggle command
-                else if (type && strcmp(type, "toggleSound") == 0)
-                {
-                    // Update global soundEnabled flag based on received content
+                } else if (type && strcmp(type, "toggleSound") == 0) {
                     soundEnabled = (content && strcmp(content, "on") == 0);
                     feedbackDoc["content"]["message"] = soundEnabled ? "Sound enabled" : "Sound disabled";
-                }
-                else
-                {
-                    // Unknown command
+                } else {
                     feedbackDoc["content"]["status"] = "error";
                     feedbackDoc["content"]["message"] = "Unknown type";
                 }
 
-                // If no error, set status to ok
                 if (!feedbackDoc["content"]["status"])
                     feedbackDoc["content"]["status"] = "ok";
                 feedbackDoc["type"] = "feedback";
-                // Release mutex after handling command
                 xSemaphoreGive(writeDataMutex);
             }
         }
-
-        // Send feedback JSON to BLE client
         serializeJson(feedbackDoc, feedbackJson);
         characteristic->setValue(feedbackJson.c_str());
         characteristic->notify();
-        // Signal buzzer task to provide feedback
         xSemaphoreGive(buzzerSemaphore);
+    }
+};
+
+//==============================================================================
+// BLE CHARACTERISTIC CALLBACKS (OTA)
+//==============================================================================
+class OtaCallbacks : public BLECharacteristicCallbacks
+{
+    void onWrite(BLECharacteristic *pCharacteristic) override
+    {
+        uint8_t *pData;
+        std::string value = pCharacteristic->getValue();
+        int len = value.length();
+        pData = pCharacteristic->getData();
+
+        if (pData != NULL)
+        {
+            if (pData[0] == 0xFB)
+            {
+                int pos = pData[1];
+                for (int x = 0; x < len - 2; x++)
+                {
+                    if (current)
+                    {
+                        updater[(pos * MTU) + x] = pData[x + 2];
+                    }
+                    else
+                    {
+                        updater2[(pos * MTU) + x] = pData[x + 2];
+                    }
+                }
+            }
+            else if (pData[0] == 0xFC)
+            {
+                if (current)
+                {
+                    writeLen = (pData[1] * 256) + pData[2];
+                }
+                else
+                {
+                    writeLen2 = (pData[1] * 256) + pData[2];
+                }
+                current = !current;
+                cur = (pData[3] * 256) + pData[4];
+                writeFile = true;
+                if (cur < parts - 1)
+                {
+                    request = !FASTMODE;
+                }
+            }
+            else if (pData[0] == 0xFD)
+            {
+                sendMode = true;
+                if (FLASH.exists("/update.bin"))
+                {
+                    FLASH.remove("/update.bin");
+                }
+            }
+            else if (pData[0] == 0xFE)
+            {
+                rParts = 0;
+                tParts = (pData[1] * 256 * 256 * 256) + (pData[2] * 256 * 256) + (pData[3] * 256) + pData[4];
+                Serial.print("Available space: ");
+                Serial.println(FLASH.totalBytes() - FLASH.usedBytes());
+                Serial.print("File Size: ");
+                Serial.println(tParts);
+            }
+            else if (pData[0] == 0xFF)
+            {
+                parts = (pData[1] * 256) + pData[2];
+                MTU = (pData[3] * 256) + pData[4];
+                OTA_STATE = UPDATE_MODE;
+            }
+            else if (pData[0] == 0xEF)
+            {
+                FLASH.format();
+                sendSize = true;
+            }
+        }
     }
 };
 
@@ -164,61 +319,163 @@ class MyCallbacks : public BLECharacteristicCallbacks
 //==============================================================================
 void setupBLE()
 {
-    // Initialize BLE device with custom name
     BLEDevice::init(DEVICE_ID);
-    // Create BLE server and set connection callbacks
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new MyServerCallbacks());
-    // Create BLE service with custom UUID
-    BLEService *pService = pServer->createService(SERVICE_UUID);
 
-    // Create BLE characteristic with read, write, notify, and indicate properties
+    // --- APP SERVICE ---
+    BLEService *pService = pServer->createService(SERVICE_UUID);
     pCharacteristic = pService->createCharacteristic(
         CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_READ |
-            BLECharacteristic::PROPERTY_WRITE |
-            BLECharacteristic::PROPERTY_NOTIFY |
-            BLECharacteristic::PROPERTY_INDICATE);
+        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE |
+        BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_INDICATE);
+    
+    versionCharacteristic = pService->createCharacteristic(
+        VERSION_CHARACTERISTIC_UUID, BLECharacteristic::PROPERTY_READ);
+    versionCharacteristic->setValue(FIRMWARE_VERSION.c_str());
 
-    // Add descriptor for BLE notifications
     pCharacteristic->addDescriptor(new BLE2902());
-    // Set custom callbacks for BLE characteristic
-    pCharacteristic->setCallbacks(new MyCallbacks());
-    // Start BLE service
+    pCharacteristic->setCallbacks(new AppCallbacks());
     pService->start();
 
-    // Configure BLE advertising parameters
+    // --- OTA SERVICE ---
+    BLEService *pOtaService = pServer->createService(OTA_SERVICE_UUID);
+    pOtaCharacteristicTX = pOtaService->createCharacteristic(
+        OTA_CHARACTERISTIC_UUID_TX, BLECharacteristic::PROPERTY_NOTIFY);
+    pOtaCharacteristicRX = pOtaService->createCharacteristic(
+        OTA_CHARACTERISTIC_UUID_RX, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+    
+    pOtaCharacteristicRX->setCallbacks(new OtaCallbacks());
+    pOtaCharacteristicTX->addDescriptor(new BLE2902());
+    pOtaCharacteristicTX->setNotifyProperty(true);
+    pOtaService->start();
+
+    // --- ADVERTISING ---
     BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->addServiceUUID(OTA_SERVICE_UUID);
     pAdvertising->setScanResponse(true);
     pAdvertising->setMinPreferred(0x06);
     pAdvertising->setMinPreferred(0x12);
-    // Start advertising so clients can discover the device
     BLEDevice::startAdvertising();
-    Serial.println("BLE service started, waiting for client...");
+    Serial.println("BLE services started (App + OTA).");
 }
 
 //==============================================================================
-// BLUETOOTH SENDER TASK
+// TASKS
 //==============================================================================
+
 void bluetoothTask(void *parameter)
 {
     char receivedJson[256];
     for (;;)
     {
-        // Wait for JSON data from the queue (produced by other tasks)
         if (xQueueReceive(jsonDataQueue, &receivedJson, portMAX_DELAY) == pdPASS)
         {
-            // Only send data if BLE client is connected and characteristic is valid
             if (bluetoothConnected && pCharacteristic != nullptr)
             {
                 Serial.print("📤 Sending via BLE: ");
                 Serial.println(receivedJson);
-                // Set characteristic value and notify client
                 pCharacteristic->setValue((uint8_t *)receivedJson, strlen(receivedJson));
                 pCharacteristic->notify();
             }
-            // If not connected, discard the message (no notification sent)
         }
+    }
+}
+
+void otaTask(void *parameter)
+{
+    for (;;)
+    {
+        switch (OTA_STATE)
+        {
+        case NORMAL_MODE:
+            if (bluetoothConnected)
+            {
+                if (sendMode)
+                {
+                    uint8_t fMode[] = {0xAA, FASTMODE};
+                    pOtaCharacteristicTX->setValue(fMode, 2);
+                    pOtaCharacteristicTX->notify();
+                    vTaskDelay(pdMS_TO_TICKS(50));
+                    sendMode = false;
+                }
+                if (sendSize)
+                {
+                    unsigned long x = FLASH.totalBytes();
+                    unsigned long y = FLASH.usedBytes();
+                    uint8_t fSize[] = {0xEF, (uint8_t)(x >> 16), (uint8_t)(x >> 8), (uint8_t)x, (uint8_t)(y >> 16), (uint8_t)(y >> 8), (uint8_t)y};
+                    pOtaCharacteristicTX->setValue(fSize, 7);
+                    pOtaCharacteristicTX->notify();
+                    vTaskDelay(pdMS_TO_TICKS(50));
+                    sendSize = false;
+                }
+            }
+            break;
+
+        case UPDATE_MODE:
+            if (request)
+            {
+                uint8_t rq[] = {0xF1, (uint8_t)((cur + 1) / 256), (uint8_t)((cur + 1) % 256)};
+                pOtaCharacteristicTX->setValue(rq, 3);
+                pOtaCharacteristicTX->notify();
+                vTaskDelay(pdMS_TO_TICKS(50));
+                request = false;
+            }
+
+            if (cur + 1 == parts)
+            { // Received complete file
+                uint8_t com[] = {0xF2, (uint8_t)((cur + 1) / 256), (uint8_t)((cur + 1) % 256)};
+                pOtaCharacteristicTX->setValue(com, 3);
+                pOtaCharacteristicTX->notify();
+                vTaskDelay(pdMS_TO_TICKS(50));
+                OTA_STATE = OTA_MODE;
+            }
+
+            if (writeFile)
+            {
+                if (!current)
+                {
+                    writeBinary(FLASH, "/update.bin", updater, writeLen);
+                }
+                else
+                {
+                    writeBinary(FLASH, "/update.bin", updater2, writeLen2);
+                }
+            }
+            break;
+
+        case OTA_MODE:
+            if (writeFile)
+            {
+                if (!current)
+                {
+                    writeBinary(FLASH, "/update.bin", updater, writeLen);
+                }
+                else
+                {
+                    writeBinary(FLASH, "/update.bin", updater2, writeLen2);
+                }
+            }
+
+            if (rParts == tParts)
+            {
+                Serial.println("OTA Download Complete");
+                vTaskDelay(pdMS_TO_TICKS(5000));
+                updateFromFS(FLASH);
+            }
+            else
+            {
+                writeFile = true;
+                Serial.println("Incomplete");
+                Serial.print("Expected: "); Serial.print(tParts);
+                Serial.print(" Received: "); Serial.println(rParts);
+                vTaskDelay(pdMS_TO_TICKS(2000));
+            }
+            break;
+        }
+        
+        // Delay para evitar Watchdog trigger se nada estiver acontecendo
+        vTaskDelay(pdMS_TO_TICKS(20)); 
     }
 }

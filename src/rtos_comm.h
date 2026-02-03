@@ -24,6 +24,7 @@
 extern MFRC522 mfrc522;                    ///< Global instance of the MFRC522 RFID reader.
 extern MFRC522::MIFARE_Key key;            ///< Global MIFARE key for card authentication.
 extern BLECharacteristic *pCharacteristic; ///< Global pointer to the BLE characteristic.
+extern BLECharacteristic *versionCharacteristic; ///< Global pointer to the BLE characteristic.
 
 //==============================================================================
 // GLOBAL STATE VARIABLES

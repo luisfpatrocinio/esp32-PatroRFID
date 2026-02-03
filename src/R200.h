@@ -102,6 +102,8 @@ public:
      */
     void writeEPC(String newEPC, String password = "00000000");
 
+    int writeStatus = 0; ///< Status da última operação de escrita (0=Nada, 1=Sucesso, >1=Erro).
+
 private:
     HardwareSerial &_serial; ///< Referência para a instância da Serial física.
     uint8_t _buffer[256];    ///< Buffer circular para remontagem de pacotes.

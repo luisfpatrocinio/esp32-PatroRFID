@@ -89,7 +89,9 @@ void setup()
     // --- Task Creation ---
     xTaskCreatePinnedToCore(rfidTask, "RFID_Task", 4096, NULL, 2, NULL, 1);
 
-    xTaskCreatePinnedToCore(rfidWriteTask, "RFID_Write_Task", 4096, NULL, 2, NULL, 1);
+    // @TODO
+    // xTaskCreatePinnedToCore(rfidWriteTask, "RFID_Write_Task", 4096, NULL, 2, NULL, 1);
+    Serial.println("Writing task deactivated temporarily.");
 
     xTaskCreatePinnedToCore(bluetoothTask, "Bluetooth_Task", 4096, NULL, 1, NULL, 1);
     xTaskCreatePinnedToCore(buzzerTask, "Buzzer_Task", 1024, NULL, 1, NULL, 1);

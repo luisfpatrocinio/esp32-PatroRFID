@@ -129,18 +129,16 @@ void rfidTask(void *parameter)
 }
 
 //==============================================================================
-// RFID WRITER TASK (Adaptado para R200 com Feedback JSON)
+// RFID WRITER TASK
 //==============================================================================
 void rfidWriteTask(void *parameter)
 {
-    // Trava para evitar disparos múltiplos enquanto segura o gatilho
-    bool triggerLocked = false;
-
     for (;;)
     {
-        // 1. Obter dados globais com segurança
-        bool isWriteMode = false;
-        String localDataToRecord = "";
+        /*
+        // Check write mode and get data to record (protected by mutex)
+        bool isWriteMode;
+        String localDataToRecord;
 
         if (xSemaphoreTake(writeDataMutex, (TickType_t)10) == pdTRUE)
         {
@@ -149,87 +147,66 @@ void rfidWriteTask(void *parameter)
             xSemaphoreGive(writeDataMutex);
         }
 
-        // 2. Lógica de Escrita
-        // Só prossegue se estiver em modo escrita, tiver dados E o gatilho for apertado
+        // Only proceed if in write mode and there is data to write
         if (isWriteMode && localDataToRecord.length() > 0)
         {
-            // Leitura do Gatilho (Segurança para UHF)
-            if (digitalRead(READ_BUTTON_PIN) == LOW)
+            // Wait for a new RFID tag to be presented
+            if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial())
             {
-                if (!triggerLocked) // Só executa uma vez por clique
+                // Prepare feedback JSON for BLE notification
+                JsonDocument feedbackDoc;
+                feedbackDoc["type"] = "feedback";
+                Serial.println("Attempting to write data to RFID tag...");
+
+                // Access the RFID tag's memory block before writing data
+                MFRC522::StatusCode status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, TRAILER_BLOCK, &key, &(mfrc522.uid));
+
+                if (status != MFRC522::STATUS_OK)
                 {
-                    // --- PREPARAÇÃO ---
-                    JsonDocument feedbackDoc;
-                    feedbackDoc["type"] = "feedback";
-                    Serial.println("Tentando escrever na tag (R200)...");
+                    // Could not access tag memory block, cannot write data
+                    feedbackDoc["content"]["status"] = "error";
+                    feedbackDoc["content"]["message"] = "Tag access error.";
+                    Serial.println("Tag access error, cannot write data.");
+                }
+                else
+                {
+                    // Prepare buffer and copy data to be written
+                    byte buffer[16] = {0};
+                    strncpy((char *)buffer, localDataToRecord.c_str(), 15);
 
-                    // Reseta o status antes de enviar
-                    rfid.writeStatus = 0;
+                    Serial.println("Attempting to write data to RFID tag...");
 
-                    // --- ENVIO DO COMANDO ---
-                    rfid.writeEPC(localDataToRecord);
-
-                    // --- AGUARDAR RESPOSTA (Timeout 500ms) ---
-                    // Como é assíncrono, ficamos ouvindo a serial até ter resposta
-                    unsigned long startTime = millis();
-                    bool responseReceived = false;
-
-                    while (millis() - startTime < 500)
+                    // Write data to the specified block
+                    status = mfrc522.MIFARE_Write(DATA_BLOCK, buffer, 16);
+                    if (status == MFRC522::STATUS_OK)
                     {
-                        R200Tag dummy;                   // Não usada aqui, apenas para o parser funcionar
-                        rfid.processIncomingData(dummy); // Isso vai atualizar rfid.writeStatus
-
-                        if (rfid.writeStatus != 0) // Chegou resposta! (1 ou Erro)
-                        {
-                            responseReceived = true;
-                            break;
-                        }
-                        vTaskDelay(pdMS_TO_TICKS(5));
-                    }
-
-                    // --- GERAÇÃO DO JSON (Baseado no resultado) ---
-                    if (responseReceived && rfid.writeStatus == 1)
-                    {
-                        // SUCESSO
+                        // Write successful, signal buzzer for feedback
                         feedbackDoc["content"]["status"] = "ok";
-                        feedbackDoc["content"]["message"] = "Gravado com Sucesso: " + localDataToRecord;
-
-                        xSemaphoreGive(buzzerSemaphore); // Beep de sucesso
-                        Serial.println("Sucesso confirmado via Protocolo.");
+                        feedbackDoc["content"]["message"] = "Write successful: " + localDataToRecord;
+                        xSemaphoreGive(buzzerSemaphore);
+                        Serial.println("Data written successfully to RFID tag.");
                     }
                     else
                     {
-                        // ERRO ou TIMEOUT
-                        String msg = "Erro desconhecido";
-                        if (!responseReceived)
-                            msg = "Timeout (Sem tag?)";
-                        else if (rfid.writeStatus == 0x16)
-                            msg = "Erro: Acesso Negado/Senha";
-                        else if (rfid.writeStatus == 0x10)
-                            msg = "Erro: Falha na Tag";
-                        else
-                            msg = "Erro Code: 0x" + String(rfid.writeStatus, HEX);
-
+                        // Write failed, report error
                         feedbackDoc["content"]["status"] = "error";
-                        feedbackDoc["content"]["message"] = msg;
-
-                        Serial.println(msg);
+                        feedbackDoc["content"]["message"] = "Write Failed: " + String(mfrc522.GetStatusCodeName(status));
+                        Serial.println("Data write failed: " + String(mfrc522.GetStatusCodeName(status)));
                     }
-
-                    // --- ENVIO PARA O APP ---
-                    char feedbackJson[256];
-                    serializeJson(feedbackDoc, feedbackJson);
-                    xQueueSend(jsonDataQueue, &feedbackJson, (TickType_t)10);
-
-                    triggerLocked = true; // Impede repetição até soltar o botão
                 }
-            }
-            else
-            {
-                triggerLocked = false; // Gatilho solto, reseta trava
+
+                // Send feedback JSON to BLE queue
+                char feedbackJson[128];
+                serializeJson(feedbackDoc, feedbackJson);
+                xQueueSend(jsonDataQueue, &feedbackJson, (TickType_t)10);
+
+                // Halt communication with card and stop encryption
+                mfrc522.PICC_HaltA();
+                mfrc522.PCD_StopCrypto1();
             }
         }
-
+        */
+        // Short delay to avoid busy looping
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }

@@ -212,7 +212,7 @@ void bluetoothTask(void *parameter)
             // Only send data if BLE client is connected and characteristic is valid
             if (bluetoothConnected && pCharacteristic != nullptr)
             {
-                Serial.print("📤 Sending via BLE: ");
+                Serial.print("Sending via BLE: ");
                 Serial.println(receivedJson);
                 // Set characteristic value and notify client
                 pCharacteristic->setValue((uint8_t *)receivedJson, strlen(receivedJson));

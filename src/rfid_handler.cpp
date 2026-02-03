@@ -12,6 +12,7 @@
 #include "rfid_handler.h"
 #include "rtos_comm.h"
 #include <ArduinoJson.h>
+#include <ctype.h> // For isxdigit
 
 //==============================================================================
 // Standard Library Includes
@@ -38,9 +39,6 @@ void rfidTask(void *parameter)
 {
     String lastEPC = "";
     R200Tag readTag;
-
-    // Variable to control the time between beeps for the same tag (optional)
-    unsigned long lastBeepTime = 0;
 
     for (;;)
     {
@@ -74,14 +72,27 @@ void rfidTask(void *parameter)
                     if (readTag.epc != lastEPC)
                     {
                         lastEPC = readTag.epc;
-                        lastBeepTime = millis();
+
+                        // Tenta decodificar o EPC para Texto Legível
+                        String decodedText = hexToText(readTag.epc);
 
                         // Prepare JSON document
                         JsonDocument jsonDoc;
                         jsonDoc["type"] = "readResult";
+
+                        // Envia os dois formatos: hex bruto (UID) e o decodificado (data)
                         jsonDoc["content"]["uid"] = readTag.epc;
                         jsonDoc["content"]["rssi"] = readTag.rssi;
-                        jsonDoc["content"]["data"] = "EPC Gen2 Data"; // Placeholder
+
+                        // Se o texto decodificado parecer válido, mostramos ele no campo data
+                        if (decodedText.length() > 0)
+                        {
+                            jsonDoc["content"]["data"] = decodedText;
+                        }
+                        else
+                        {
+                            jsonDoc["content"]["data"] = readTag.epc;
+                        }
 
                         // Serialize JSON to string
                         char jsonString[256];
@@ -93,12 +104,10 @@ void rfidTask(void *parameter)
                         // Signal buzzer for feedback
                         xSemaphoreGive(buzzerSemaphore);
 
-                        Serial.print("Tag UHF Detectada: ");
-                        Serial.println(readTag.epc);
-                    }
-                    else
-                    {
-                        // Efeito Ghost: If the same tag is read again after some time, we can still give feedback
+                        Serial.print("Tag: ");
+                        Serial.print(readTag.epc);
+                        Serial.print(" -> Texto: ");
+                        Serial.println(decodedText);
                     }
                 }
                 // Small delay to avoid crashing the CPU and allow the UART buffer to fill up
@@ -107,24 +116,15 @@ void rfidTask(void *parameter)
         }
         else
         {
-            // Reset lastEPC if button is not pressed or in write mode
             if (lastEPC != "")
-            {
                 lastEPC = "";
-                Serial.println("--- Paused Reading (Trigger Released) ---");
-            }
-
             if (Serial2.available())
             {
-                // It is important to continue processing residual data that may arrive at the Serial port
-                // to keep the buffer clean, even without actively "requesting" a read.
                 R200Tag dummy;
                 rfid.processIncomingData(dummy);
             }
+            vTaskDelay(pdMS_TO_TICKS(50));
         }
-
-        // Short delay to avoid busy looping
-        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
@@ -158,16 +158,38 @@ void rfidWriteTask(void *parameter)
             {
                 if (!triggerLocked) // Só executa uma vez por clique
                 {
-                    // --- PREPARAÇÃO ---
-                    JsonDocument feedbackDoc;
-                    feedbackDoc["type"] = "feedback";
-                    Serial.println("Tentando escrever na tag (R200)...");
+                    // --- CONVERSÃO AUTOMÁTICA ---
+                    // Se o dado recebido não for Hex puro, converte para Hex
+                    // Ex: Recebe "DISCOR" -> Converte para "444953434F52"
+                    String epcToSend = localDataToRecord;
 
-                    // Reseta o status antes de enviar
+                    // Verificação simples: Se tiver letras > F, com certeza é texto
+                    bool looksLikeText = false;
+                    for (char c : localDataToRecord)
+                    {
+                        if (!isxdigit(c))
+                        {
+                            looksLikeText = true;
+                            break;
+                        }
+                    }
+
+                    // Se parece texto (ex: tem 'R', 'S', etc) OU se queremos forçar texto
+                    // (Recomendado forçar texto se o seu sistema usa nomes como IDs)
+                    if (looksLikeText)
+                    {
+                        epcToSend = textToHex(localDataToRecord);
+                    }
+
+                    Serial.print("Gravando Texto: ");
+                    Serial.print(localDataToRecord);
+                    Serial.print(" -> Hex: ");
+                    Serial.println(epcToSend);
+
                     rfid.writeStatus = 0;
 
-                    // --- ENVIO DO COMANDO ---
-                    rfid.writeEPC(localDataToRecord);
+                    // Envia o HEX já tratado
+                    rfid.writeEPC(epcToSend);
 
                     // --- AGUARDAR RESPOSTA (Timeout 500ms) ---
                     // Como é assíncrono, ficamos ouvindo a serial até ter resposta
@@ -188,11 +210,14 @@ void rfidWriteTask(void *parameter)
                     }
 
                     // --- GERAÇÃO DO JSON (Baseado no resultado) ---
+                    JsonDocument feedbackDoc;
+                    feedbackDoc["type"] = "feedback";
+
                     if (responseReceived && rfid.writeStatus == 1)
                     {
                         // SUCESSO
                         feedbackDoc["content"]["status"] = "ok";
-                        feedbackDoc["content"]["message"] = "Gravado com Sucesso: " + localDataToRecord;
+                        feedbackDoc["content"]["message"] = "Gravado: " + localDataToRecord;
 
                         xSemaphoreGive(buzzerSemaphore); // Beep de sucesso
                         Serial.println("Sucesso confirmado via Protocolo.");
@@ -200,7 +225,7 @@ void rfidWriteTask(void *parameter)
                     else
                     {
                         // ERRO ou TIMEOUT
-                        String msg = "Erro desconhecido";
+                        String msg = "Erro na gravacao.";
                         if (!responseReceived)
                             msg = "Timeout (Sem tag?)";
                         else if (rfid.writeStatus == 0x16)
@@ -232,4 +257,49 @@ void rfidWriteTask(void *parameter)
 
         vTaskDelay(pdMS_TO_TICKS(50));
     }
+}
+
+//==============================================================================
+// HELPER FUNCTIONS (Conversão Texto <-> Hex)
+//==============================================================================
+
+// Converte texto normal (Ex: "DISCOR") para Hex (Ex: "444953434F52")
+String textToHex(String text)
+{
+    String hexString = "";
+    for (unsigned int i = 0; i < text.length(); i++)
+    {
+        char c = text.charAt(i);
+        if (c < 16)
+            hexString += "0";
+        hexString += String(c, HEX);
+    }
+    hexString.toUpperCase();
+
+    // Padding: Garante que o tamanho final é múltiplo de 4 (Requisito Gen2)
+    while (hexString.length() % 4 != 0)
+    {
+        hexString += "0";
+    }
+    return hexString;
+}
+
+// Converte Hex (Ex: "444953434F52") de volta para Texto (Ex: "DISCOR")
+String hexToText(String hex)
+{
+    String text = "";
+    for (unsigned int i = 0; i < hex.length(); i += 2)
+    {
+        // Pega pares de caracteres (bytes)
+        String byteString = hex.substring(i, i + 2);
+        // Converte base 16 para char
+        char byte = (char)strtol(byteString.c_str(), NULL, 16);
+
+        // Só adiciona se for caractere imprimível (evita lixo de memória e caracteres de controle)
+        if (byte >= 32 && byte <= 126)
+        {
+            text += byte;
+        }
+    }
+    return text;
 }

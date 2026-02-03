@@ -20,4 +20,8 @@ void rfidTask(void *parameter);
  */
 void rfidWriteTask(void *parameter);
 
+// Declaração das Funções Auxiliares
+String textToHex(String text);
+String hexToText(String hex);
+
 #endif // RFID_HANDLER_H

@@ -212,13 +212,16 @@ uint8_t R200Driver::hexCharToByte(char c)
 
 void R200Driver::writeEPC(String newEPC, String password)
 {
-    // 1. Validação Básica
-    // O EPC deve ter tamanho par (bytes completos) e idealmente múltiplo de 4 (words)
-    if (newEPC.length() % 4 != 0)
+    // 1. Tratamento de Padding (Preenchimento Automático)
+    // O protocolo exige blocos de 16 bits (4 caracteres Hex).
+    // Se não for múltiplo de 4, adicionamos '0' à ESQUERDA até corrigir.
+    while (newEPC.length() % 4 != 0)
     {
-        Serial.println("[Erro] O EPC deve ter comprimento multiplo de 4 caracteres (Ex: 1122, AABBCCDD)");
-        return;
+        newEPC = "0" + newEPC;
     }
+
+    Serial.print("[R200] EPC Ajustado para gravar: ");
+    Serial.println(newEPC);
 
     // 2. Preparação dos Parâmetros do Comando 0x49
     // Estrutura: [Pass(4)] + [MemBank(1)] + [StartAddr(2)] + [DataLen(2)] + [Data(N)]

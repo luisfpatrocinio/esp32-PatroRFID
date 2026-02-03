@@ -119,15 +119,12 @@ bool R200Driver::processIncomingData(R200Tag &outputTag)
             // CASO 2: Confirmação de Escrita
             else if (cmd == 0x49)
             {
-                writeStatus = 1; // SUCESSO!
                 Serial.println("[R200] Escrita realizada com SUCESSO!");
             }
             // CASO 3: Erro (Leitura ou Escrita)
             else if (cmd == 0xFF)
             {
                 uint8_t errCode = _buffer[5];
-                writeStatus = errCode; // Guarda o código do erro (ex: 0x16)
-
                 Serial.print("[R200] Erro: 0x");
                 Serial.println(errCode, HEX);
 

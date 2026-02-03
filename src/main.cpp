@@ -1,17 +1,23 @@
+//==============================================================================
+// Project Header Includes
+//==============================================================================
 /**
  * @file main.cpp
  * @author Luis Felipe Patrocinio (https://www.github.com/luisfpatrocinio)
- * @brief Main firmware file. Initializes modules, FS, and starts FreeRTOS tasks.
- * @version 3.1
+ * @brief Main firmware file for the Handheld RFID Reader. Initializes modules and starts FreeRTOS tasks.
+ * @version 3.0
  * @date 2025-08-26
  */
+
+//==============================================================================
+// INCLUDES
+//==============================================================================
 
 //==============================================================================
 // Arduino & ESP32 Includes
 //==============================================================================
 #include <Arduino.h>
 #include <SPI.h>
-#include <SPIFFS.h> // Adicionado para OTA
 
 //==============================================================================
 // Project Header Includes
@@ -22,17 +28,16 @@
 #include "rfid_handler.h"
 #include "ui_handler.h"
 
+//======================='=======================================================
+// GLOBAL OBJECTS & CONSTANTS (DEFINITIONS)
 //==============================================================================
-// GLOBAL OBJECTS & CONSTANTS
-//==============================================================================
-const char *DEVICE_ID = "Pistola-SSRFID";
+const char *DEVICE_ID = "PatroRFID-Reader";
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 MFRC522::MIFARE_Key key;
 BLECharacteristic *pCharacteristic = nullptr;
-BLECharacteristic *versionCharacteristic = nullptr;
 
 //==============================================================================
-// GLOBAL STATE VARIABLES
+// GLOBAL STATE VARIABLES (DEFINITIONS)
 //==============================================================================
 volatile bool bluetoothConnected = false;
 volatile bool writeMode = false;
@@ -40,7 +45,7 @@ String dataToRecord = "";
 volatile bool soundEnabled = true;
 
 //==============================================================================
-// FreeRTOS HANDLES
+// FreeRTOS HANDLES (DEFINITIONS)
 //==============================================================================
 QueueHandle_t jsonDataQueue;
 SemaphoreHandle_t buzzerSemaphore;
@@ -53,13 +58,6 @@ void setup()
 {
     Serial.begin(115200);
     Serial.println("System Initializing...");
-
-    // --- Filesystem Initialization for OTA ---
-    if (!SPIFFS.begin(true)) {
-        Serial.println("SPIFFS Mount Failed");
-    } else {
-        Serial.println("SPIFFS Mounted Successfully");
-    }
 
     // --- Hardware and Peripheral Initialization ---
     pinMode(BUZZER_PIN, OUTPUT);
@@ -83,17 +81,14 @@ void setup()
     Serial.println("RTOS primitives created.");
 
     // --- Module Initialization ---
-    setupBLE(); // Initializes BLE services (App + OTA)
+    setupBLE(); // Initializes and starts BLE services
 
     // --- Task Creation ---
     xTaskCreatePinnedToCore(rfidTask, "RFID_Task", 4096, NULL, 2, NULL, 1);
     xTaskCreatePinnedToCore(rfidWriteTask, "RFID_Write_Task", 4096, NULL, 2, NULL, 1);
     xTaskCreatePinnedToCore(bluetoothTask, "Bluetooth_Task", 4096, NULL, 1, NULL, 1);
-    // Task dedicada ao OTA (gerenciamento de escrita na flash)
-    xTaskCreatePinnedToCore(otaTask, "OTA_Task", 8192, NULL, 1, NULL, 1); 
     xTaskCreatePinnedToCore(buzzerTask, "Buzzer_Task", 1024, NULL, 1, NULL, 1);
     xTaskCreatePinnedToCore(ledTask, "LED_Task", 2048, NULL, 1, NULL, 1);
-    
     Serial.println("FreeRTOS tasks created. System is running.");
 }
 
@@ -102,5 +97,6 @@ void setup()
 //==============================================================================
 void loop()
 {
+    // FreeRTOS handles tasks; main loop remains empty.
     vTaskDelay(pdMS_TO_TICKS(1000));
 }

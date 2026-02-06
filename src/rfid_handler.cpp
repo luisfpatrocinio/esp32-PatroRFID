@@ -50,8 +50,16 @@ void rfidTask(void *parameter)
             xSemaphoreGive(writeDataMutex);
         }
 
+        // If we are in write mode, this task MUST completely stop manipulating Serial2,
+        // otherwise it will steal the response from the write task.
+        if (isWriteMode)
+        {
+            vTaskDelay(pdMS_TO_TICKS(100)); // Dorme um pouco e tenta de novo
+            continue;                       // Pula todo o resto do loop
+        }
+
         // LOGIC: If button is pressed, send read command (Poll)
-        if (digitalRead(READ_BUTTON_PIN) == LOW && !isWriteMode)
+        if (digitalRead(READ_BUTTON_PIN) == LOW)
         {
             // Send single read command
             rfid.singlePoll();
@@ -79,20 +87,18 @@ void rfidTask(void *parameter)
                         // Prepare JSON document
                         JsonDocument jsonDoc;
                         jsonDoc["type"] = "readResult";
+                        jsonDoc["content"]["status"] = "ok";
 
                         // Envia os dois formatos: hex bruto (UID) e o decodificado (data)
                         jsonDoc["content"]["uid"] = readTag.epc;
+                        jsonDoc["content"]["text"] = decodedText;
                         jsonDoc["content"]["rssi"] = readTag.rssi;
 
                         // Se o texto decodificado parecer válido, mostramos ele no campo data
                         if (decodedText.length() > 0)
-                        {
                             jsonDoc["content"]["data"] = decodedText;
-                        }
                         else
-                        {
                             jsonDoc["content"]["data"] = readTag.epc;
-                        }
 
                         // Serialize JSON to string
                         char jsonString[256];
@@ -105,8 +111,6 @@ void rfidTask(void *parameter)
                         xSemaphoreGive(buzzerSemaphore);
 
                         Serial.print("Tag: ");
-                        Serial.print(readTag.epc);
-                        Serial.print(" -> Texto: ");
                         Serial.println(decodedText);
                     }
                 }
@@ -118,6 +122,8 @@ void rfidTask(void *parameter)
         {
             if (lastEPC != "")
                 lastEPC = "";
+
+            // Limpeza ociosa (Só se NÃO estiver em modo escrita, garantido pelo if lá em cima)
             if (Serial2.available())
             {
                 R200Tag dummy;
@@ -133,12 +139,10 @@ void rfidTask(void *parameter)
 //==============================================================================
 void rfidWriteTask(void *parameter)
 {
-    // Trava para evitar disparos múltiplos enquanto segura o gatilho
     bool triggerLocked = false;
 
     for (;;)
     {
-        // 1. Obter dados globais com segurança
         bool isWriteMode = false;
         String localDataToRecord = "";
 
@@ -149,59 +153,46 @@ void rfidWriteTask(void *parameter)
             xSemaphoreGive(writeDataMutex);
         }
 
-        // 2. Lógica de Escrita
-        // Só prossegue se estiver em modo escrita, tiver dados E o gatilho for apertado
         if (isWriteMode && localDataToRecord.length() > 0)
         {
-            // Leitura do Gatilho (Segurança para UHF)
             if (digitalRead(READ_BUTTON_PIN) == LOW)
             {
-                if (!triggerLocked) // Só executa uma vez por clique
+                if (!triggerLocked)
                 {
-                    // --- CONVERSÃO AUTOMÁTICA ---
-                    // Se o dado recebido não for Hex puro, converte para Hex
-                    // Ex: Recebe "DISCOR" -> Converte para "444953434F52"
+                    // 1. Conversão (Texto -> Hex)
                     String epcToSend = localDataToRecord;
-
-                    // Verificação simples: Se tiver letras > F, com certeza é texto
                     bool looksLikeText = false;
-                    for (char c : localDataToRecord)
+                    for (unsigned int i = 0; i < localDataToRecord.length(); i++)
                     {
+                        char c = localDataToRecord.charAt(i);
                         if (!isxdigit(c))
                         {
                             looksLikeText = true;
                             break;
                         }
                     }
-
-                    // Se parece texto (ex: tem 'R', 'S', etc) OU se queremos forçar texto
-                    // (Recomendado forçar texto se o seu sistema usa nomes como IDs)
                     if (looksLikeText)
-                    {
                         epcToSend = textToHex(localDataToRecord);
-                    }
 
-                    Serial.print("Gravando Texto: ");
-                    Serial.print(localDataToRecord);
-                    Serial.print(" -> Hex: ");
-                    Serial.println(epcToSend);
+                    Serial.print("Gravando: ");
+                    Serial.println(localDataToRecord);
 
+                    // 2. Limpeza de Buffer
+                    while (Serial2.available())
+                        Serial2.read();
+
+                    // 3. Envio do Comando
                     rfid.writeStatus = 0;
-
-                    // Envia o HEX já tratado
                     rfid.writeEPC(epcToSend);
 
-                    // --- AGUARDAR RESPOSTA (Timeout 500ms) ---
-                    // Como é assíncrono, ficamos ouvindo a serial até ter resposta
+                    // 4. Aguardar Resposta (1s Timeout)
                     unsigned long startTime = millis();
                     bool responseReceived = false;
-
-                    while (millis() - startTime < 500)
+                    while (millis() - startTime < 1000)
                     {
-                        R200Tag dummy;                   // Não usada aqui, apenas para o parser funcionar
-                        rfid.processIncomingData(dummy); // Isso vai atualizar rfid.writeStatus
-
-                        if (rfid.writeStatus != 0) // Chegou resposta! (1 ou Erro)
+                        R200Tag dummy;
+                        rfid.processIncomingData(dummy);
+                        if (rfid.writeStatus != 0)
                         {
                             responseReceived = true;
                             break;
@@ -209,52 +200,41 @@ void rfidWriteTask(void *parameter)
                         vTaskDelay(pdMS_TO_TICKS(5));
                     }
 
-                    // --- GERAÇÃO DO JSON (Baseado no resultado) ---
-                    JsonDocument feedbackDoc;
-                    feedbackDoc["type"] = "feedback";
+                    // 5. Geração do JSON de Resposta
+                    JsonDocument responseDoc;
 
                     if (responseReceived && rfid.writeStatus == 1)
                     {
-                        // SUCESSO
-                        feedbackDoc["content"]["status"] = "ok";
-                        feedbackDoc["content"]["message"] = localDataToRecord;
+                        // SUCESSO: Usa tipo "writeResult" para o App salvar
+                        responseDoc["type"] = "writeResult";
+                        responseDoc["content"]["status"] = "ok";
+                        responseDoc["content"]["uid"] = epcToSend;          // Hex Gravado
+                        responseDoc["content"]["data"] = localDataToRecord; // Texto Original
+                        responseDoc["content"]["message"] = "Gravado com sucesso";
 
-                        xSemaphoreGive(buzzerSemaphore); // Beep de sucesso
-                        Serial.println("Sucesso confirmado via Protocolo.");
+                        xSemaphoreGive(buzzerSemaphore); // Sucesso = Bip
                     }
                     else
                     {
-                        // ERRO ou TIMEOUT
-                        String msg = "Erro na gravacao.";
-                        if (!responseReceived)
-                            msg = "Timeout (Sem tag?)";
-                        else if (rfid.writeStatus == 0x16)
-                            msg = "Erro: Acesso Negado/Senha";
-                        else if (rfid.writeStatus == 0x10)
-                            msg = "Erro: Falha na Tag";
-                        else
-                            msg = "Erro Code: 0x" + String(rfid.writeStatus, HEX);
-
-                        feedbackDoc["content"]["status"] = "error";
-                        feedbackDoc["content"]["message"] = msg;
-
-                        Serial.println(msg);
+                        // ERRO: Usa tipo "feedback" apenas para avisar o usuário
+                        responseDoc["type"] = "feedback";
+                        responseDoc["content"]["status"] = "error";
+                        String errMsg = (responseReceived) ? String(rfid.writeStatus, HEX) : "Timeout";
+                        responseDoc["content"]["message"] = "Erro ao gravar: " + errMsg;
                     }
 
-                    // --- ENVIO PARA O APP ---
-                    char feedbackJson[256];
-                    serializeJson(feedbackDoc, feedbackJson);
-                    xQueueSend(jsonDataQueue, &feedbackJson, (TickType_t)10);
+                    char responseJson[256];
+                    serializeJson(responseDoc, responseJson);
+                    xQueueSend(jsonDataQueue, &responseJson, (TickType_t)10);
 
-                    triggerLocked = true; // Impede repetição até soltar o botão
+                    triggerLocked = true;
                 }
             }
             else
             {
-                triggerLocked = false; // Gatilho solto, reseta trava
+                triggerLocked = false;
             }
         }
-
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }

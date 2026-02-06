@@ -86,6 +86,26 @@ void R200Driver::singlePoll()
     sendCommand(0x00, 0x22, NULL, 0);
 }
 
+void R200Driver::setTxPower(uint8_t dbm)
+{
+    // Limita entre 0 e 30 dBm (0x1E)
+    if (dbm > 30)
+        dbm = 30;
+
+    // Comando 0xB6: Set Transmit Power
+    // Param 1: 0x00 (Open Loop)
+    // Param 2: Valor em dBm
+    uint8_t params[2];
+    params[0] = 0x00;
+    params[1] = dbm;
+
+    Serial.print("[R200] Configurando Potencia para: ");
+    Serial.print(dbm);
+    Serial.println(" dBm");
+
+    sendCommand(0x00, 0xB6, params, 2);
+}
+
 bool R200Driver::processIncomingData(R200Tag &outputTag)
 {
     while (_serial.available())

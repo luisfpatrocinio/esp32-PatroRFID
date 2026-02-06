@@ -70,6 +70,11 @@ void setup()
     rfid.begin();
     rfid.getHardwareVersion(); // Health Check
 
+    // --- AJUSTE DE POTÊNCIA ---
+    delay(200);          // Espera o módulo acordar
+    rfid.setTxPower(26); // 26 dBm (Alto poder de escrita!)
+    delay(100);
+
     Serial.println("Peripherals initialized.");
 
     // --- RTOS Primitives Initialization ---

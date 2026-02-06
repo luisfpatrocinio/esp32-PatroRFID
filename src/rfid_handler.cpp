@@ -217,7 +217,7 @@ void rfidWriteTask(void *parameter)
                     {
                         // SUCESSO
                         feedbackDoc["content"]["status"] = "ok";
-                        feedbackDoc["content"]["message"] = "Gravado: " + localDataToRecord;
+                        feedbackDoc["content"]["message"] = localDataToRecord;
 
                         xSemaphoreGive(buzzerSemaphore); // Beep de sucesso
                         Serial.println("Sucesso confirmado via Protocolo.");

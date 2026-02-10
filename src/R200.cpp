@@ -106,6 +106,18 @@ void R200Driver::setTxPower(uint8_t dbm)
     sendCommand(0x00, 0xB6, params, 2);
 }
 
+void R200Driver::setRegionUS()
+{
+    // Comando 0x07 = Set Region
+    // Param: 0x01 = US Standard (902-928MHz) - Compatível com Brasil
+    uint8_t region = 0x01;
+
+    Serial.println("[R200] Configurando Regiao para US/Brasil (902-928MHz)...");
+
+    // Type=00, Cmd=0x07
+    sendCommand(0x00, 0x07, &region, 1);
+}
+
 bool R200Driver::processIncomingData(R200Tag &outputTag)
 {
     while (_serial.available())

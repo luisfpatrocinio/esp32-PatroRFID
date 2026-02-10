@@ -96,6 +96,11 @@ public:
     void setTxPower(uint8_t dbm);
 
     /**
+     * @brief Configura a região de frequência para US/Brasil (902-928MHz).
+     */
+    void setRegionUS();
+
+    /**
      * @brief Escreve um novo código EPC na etiqueta.
      * @note A etiqueta deve estar próxima da antena. Cuidado para não ter várias tags perto!
      *

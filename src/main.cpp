@@ -27,7 +27,7 @@ unsigned long pressTime = 0;
 // FUNÇÕES DE TRADUÇÃO (ESTÁTICAS PARA EVITAR ERRO DE LINKAGEM)
 // =============================================================================
 
-// Converte "PROD" -> "50524F44"
+// Converte texto normal para Hex e preenche o espaço vazio
 static String textToHex(String text)
 {
     String hexString = "";
@@ -40,11 +40,15 @@ static String textToHex(String text)
     }
     hexString.toUpperCase();
 
-    // Padding à direita
-    while (hexString.length() % 4 != 0)
+    // --- O SEGREDO ESTÁ AQUI ---
+    // A maioria das etiquetas usa 96 bits (24 caracteres hex).
+    // Preenchemos com '0' até chegar a 24 caracteres.
+    // Se a palavra for maior que 24, apenas garante que seja múltiplo de 4.
+    while (hexString.length() < 24 || hexString.length() % 4 != 0)
     {
         hexString += "0";
     }
+
     return hexString;
 }
 

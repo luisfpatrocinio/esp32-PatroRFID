@@ -70,10 +70,13 @@ void setup()
     rfid.begin();
     rfid.getHardwareVersion(); // Health Check
 
-    // --- AJUSTE DE POTÊNCIA ---
-    delay(200);          // Espera o módulo acordar
-    rfid.setTxPower(26); // 26 dBm (Alto poder de escrita!)
+    // --- CONFIGURAÇÕES VITAIS DO MÓDULO ---
+    delay(200);
+    rfid.setRegionUS(); // Frequência Brasil
     delay(100);
+    rfid.setTxPower(26); // Potência de 26 dBm (Ideal para escrita)
+    delay(100);
+    // --------------------------------------
 
     Serial.println("Peripherals initialized.");
 

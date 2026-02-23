@@ -95,6 +95,9 @@ public:
     // Função para definir potência (0-30 dBm)
     void setTxPower(uint8_t dbm);
 
+    // Configuração de Região
+    void setRegionUS();
+
     /**
      * @brief Escreve um novo código EPC na etiqueta.
      * @note A etiqueta deve estar próxima da antena. Cuidado para não ter várias tags perto!

@@ -2,10 +2,10 @@
 #include "rfid_handler.h"
 #include "rtos_comm.h"
 #include <ArduinoJson.h>
-#include <ctype.h> 
+#include <ctype.h>
 
 //==============================================================================
-// HELPER FUNCTIONS 
+// HELPER FUNCTIONS
 //==============================================================================
 
 String textToHex(String text)
@@ -14,16 +14,22 @@ String textToHex(String text)
     for (unsigned int i = 0; i < text.length(); i++)
     {
         char c = text.charAt(i);
-        if (c < 16) hexString += "0";
+        if (c < 16)
+            hexString += "0";
         hexString += String(c, HEX);
     }
     hexString.toUpperCase();
 
-    // Padding Anti-Fantasma: Garante 96 bits (24 chars) de limpeza
-    while (hexString.length() < 24 || hexString.length() % 4 != 0)
+    // Preenche com ZEROS (Limpeza) até atingir 24 caracteres (96 bits)
+    while (hexString.length() < 24)
     {
         hexString += "0";
     }
+
+    // Trava de segurança: garante que nunca excede o limite da memória EPC
+    if (hexString.length() > 24)
+        hexString = hexString.substring(0, 24);
+
     return hexString;
 }
 
@@ -34,85 +40,107 @@ String hexToText(String hex)
     {
         String byteString = hex.substring(i, i + 2);
         char byte = (char)strtol(byteString.c_str(), NULL, 16);
-        if (byte >= 32 && byte <= 126) text += byte;
+        if (byte >= 32 && byte <= 126)
+            text += byte;
     }
     return text;
 }
 
 //==============================================================================
-// RFID READER TASK (Já é contínuo nativamente pelo FreeRTOS)
+// RFID READER TASK
 //==============================================================================
 void rfidTask(void *parameter)
 {
-    String lastEPC = "";
+    String lastTID = "";
     R200Tag readTag;
 
     for (;;)
     {
         bool isWriteMode = false;
-        if (xSemaphoreTake(writeDataMutex, (TickType_t)10) == pdTRUE) {
+        if (xSemaphoreTake(writeDataMutex, (TickType_t)10) == pdTRUE)
+        {
             isWriteMode = writeMode;
             xSemaphoreGive(writeDataMutex);
         }
 
-        if (isWriteMode) {
-            vTaskDelay(pdMS_TO_TICKS(100)); 
-            continue;                       
+        if (isWriteMode)
+        {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
         }
 
-        // LEITURA CONTÍNUA (Enquanto segurar o gatilho)
         if (digitalRead(READ_BUTTON_PIN) == LOW)
         {
-            // Limpeza leve para sincronia
-            if (Serial2.available()) {
-                R200Tag dummy;
-                rfid.processIncomingData(dummy);
-            }
-
+            while (Serial2.available())
+                Serial2.read();
             rfid.singlePoll();
+
             unsigned long startTime = millis();
+            bool tagFound = false;
 
             while (millis() - startTime < 60)
             {
                 if (rfid.processIncomingData(readTag))
                 {
-                    if (readTag.epc != lastEPC)
+                    // Filtro de sanidade: descarta pacotes gigantescos (lixo)
+                    if (readTag.epc.length() <= 32)
                     {
-                        lastEPC = readTag.epc;
-                        String decodedText = hexToText(readTag.epc);
-
-                        JsonDocument jsonDoc;
-                        jsonDoc["type"] = "readResult";
-                        jsonDoc["content"]["status"] = "ok";
-                        jsonDoc["content"]["uid"] = readTag.epc;
-                        jsonDoc["content"]["text"] = decodedText;
-                        jsonDoc["content"]["rssi"] = readTag.rssi;
-
-                        if (decodedText.length() > 0) jsonDoc["content"]["data"] = decodedText;
-                        else jsonDoc["content"]["data"] = readTag.epc;
-
-                        char jsonString[256];
-                        serializeJson(jsonDoc, jsonString);
-                        xQueueSend(jsonDataQueue, &jsonString, (TickType_t)5);
-                        xSemaphoreGive(buzzerSemaphore);
-
-                        Serial.print(">>> LIDO: ");
-                        Serial.println(decodedText.length() > 0 ? decodedText : readTag.epc);
+                        tagFound = true;
+                        break; // Achei uma tag, interrompo para não poluir o buffer
                     }
                 }
                 vTaskDelay(pdMS_TO_TICKS(2));
             }
+
+            if (tagFound)
+            {
+                // Dá um instante para o R200 terminar de falar e limpa a linha
+                vTaskDelay(pdMS_TO_TICKS(15));
+                while (Serial2.available())
+                    Serial2.read();
+
+                // LÊ O IDENTIFICADOR ÚNICO DE FÁBRICA
+                String hardwareTID = rfid.getTID();
+                if (hardwareTID == "")
+                    hardwareTID = readTag.epc; // Backup
+
+                if (hardwareTID != lastTID)
+                {
+                    lastTID = hardwareTID;
+                    String decodedText = hexToText(readTag.epc);
+
+                    JsonDocument jsonDoc;
+                    jsonDoc["type"] = "readResult";
+                    jsonDoc["content"]["status"] = "ok";
+
+                    // A App recebe o UID imutável do chip
+                    jsonDoc["content"]["uid"] = hardwareTID;
+                    jsonDoc["content"]["rssi"] = readTag.rssi;
+                    jsonDoc["content"]["data"] = (decodedText.length() > 0) ? decodedText : readTag.epc;
+
+                    char jsonString[256];
+                    serializeJson(jsonDoc, jsonString);
+                    xQueueSend(jsonDataQueue, &jsonString, (TickType_t)5);
+                    xSemaphoreGive(buzzerSemaphore);
+
+                    Serial.print(">>> LIDO | TID (Físico): ");
+                    Serial.print(hardwareTID);
+                    Serial.print(" | DATA: ");
+                    Serial.println(decodedText);
+                }
+            }
         }
         else
         {
-            if (lastEPC != "") lastEPC = "";
+            if (lastTID != "")
+                lastTID = "";
             vTaskDelay(pdMS_TO_TICKS(50));
         }
     }
 }
 
 //==============================================================================
-// RFID WRITER TASK (Atualizada para Gravação Contínua)
+// RFID WRITER TASK
 //==============================================================================
 void rfidWriteTask(void *parameter)
 {
@@ -121,27 +149,83 @@ void rfidWriteTask(void *parameter)
         bool isWriteMode = false;
         String localDataToRecord = "";
 
-        if (xSemaphoreTake(writeDataMutex, (TickType_t)10) == pdTRUE) {
+        if (xSemaphoreTake(writeDataMutex, (TickType_t)10) == pdTRUE)
+        {
             isWriteMode = writeMode;
             localDataToRecord = dataToRecord;
             xSemaphoreGive(writeDataMutex);
         }
 
-        // GRAVAÇÃO CONTÍNUA (Sem a trava de clique único)
         if (isWriteMode && localDataToRecord.length() > 0)
         {
             if (digitalRead(READ_BUTTON_PIN) == LOW)
             {
+                // 1. DESCOBRIR A UID DA ETIQUETA EM CAMPO
+                String targetTID = "";
+                R200Tag tempTag;
+                bool tagFound = false;
+
+                while (Serial2.available())
+                    Serial2.read();
+                rfid.singlePoll();
+
+                unsigned long pollStart = millis();
+                while (millis() - pollStart < 100)
+                {
+                    if (rfid.processIncomingData(tempTag))
+                    {
+                        if (tempTag.epc.length() <= 32)
+                        {
+                            tagFound = true;
+                            break;
+                        }
+                    }
+                    vTaskDelay(pdMS_TO_TICKS(2));
+                }
+
+                if (tagFound)
+                {
+                    vTaskDelay(pdMS_TO_TICKS(15));
+                    while (Serial2.available())
+                        Serial2.read();
+                    targetTID = rfid.getTID();
+                    if (targetTID == "")
+                        targetTID = tempTag.epc;
+                }
+
+                if (targetTID == "")
+                {
+                    vTaskDelay(pdMS_TO_TICKS(100));
+                    continue;
+                }
+
+                // 2. PREPARAR DADOS E GRAVAR
                 String epcToSend = localDataToRecord;
                 bool looksLikeText = false;
-                for (unsigned int i = 0; i < localDataToRecord.length(); i++) {
+                for (unsigned int i = 0; i < localDataToRecord.length(); i++)
+                {
                     char c = localDataToRecord.charAt(i);
-                    if (!isxdigit(c)) { looksLikeText = true; break; }
+                    if (!isxdigit(c))
+                    {
+                        looksLikeText = true;
+                        break;
+                    }
                 }
-                if (looksLikeText) epcToSend = textToHex(localDataToRecord);
 
-                Serial.print("[App BLE] Gravando Continuamente: ");
+                if (looksLikeText)
+                    epcToSend = textToHex(localDataToRecord);
+                else
+                {
+                    while (epcToSend.length() < 24)
+                        epcToSend += "0";
+                    if (epcToSend.length() > 24)
+                        epcToSend = epcToSend.substring(0, 24);
+                }
+
+                Serial.print("[App BLE] Gravando: ");
                 Serial.println(localDataToRecord);
+                Serial.print("          Na Tag TID: ");
+                Serial.println(targetTID);
 
                 bool success = false;
                 int attempts = 0;
@@ -149,52 +233,52 @@ void rfidWriteTask(void *parameter)
                 while (attempts < 5 && !success)
                 {
                     attempts++;
-                    while (Serial2.available()) Serial2.read(); // Flush
+                    while (Serial2.available())
+                        Serial2.read();
 
                     rfid.writeStatus = 0;
                     rfid.writeEPC(epcToSend);
 
                     unsigned long startTime = millis();
-                    while (millis() - startTime < 800) {
+                    while (millis() - startTime < 800)
+                    {
                         R200Tag dummy;
                         rfid.processIncomingData(dummy);
-                        if (rfid.writeStatus != 0) break; 
+                        if (rfid.writeStatus != 0)
+                            break;
                         vTaskDelay(pdMS_TO_TICKS(5));
                     }
 
-                    if (rfid.writeStatus == 1) success = true;
-                    else vTaskDelay(pdMS_TO_TICKS(100));
+                    if (rfid.writeStatus == 1)
+                        success = true;
+                    else
+                        vTaskDelay(pdMS_TO_TICKS(100));
                 }
 
+                // 3. ENVIO DE FEEDBACK AO APP
                 JsonDocument responseDoc;
 
                 if (success)
                 {
                     responseDoc["type"] = "writeResult";
                     responseDoc["content"]["status"] = "ok";
-                    responseDoc["content"]["uid"] = epcToSend;
+                    // Envia exatamente o UID de hardware lido na linha 147!
+                    responseDoc["content"]["uid"] = targetTID;
                     responseDoc["content"]["data"] = localDataToRecord;
                     responseDoc["content"]["message"] = "Gravado com Sucesso!";
 
-                    xSemaphoreGive(buzzerSemaphore); 
+                    xSemaphoreGive(buzzerSemaphore);
                     vTaskDelay(pdMS_TO_TICKS(100));
-                    xSemaphoreGive(buzzerSemaphore); // Bip duplo para sucesso
-                    
-                    Serial.println("   >>> SUCESSO! <<<");
-                    
-                    // Pausa inteligente para o utilizador poder soltar o gatilho ou trocar de etiqueta 
-                    // sem spammar o App de mensagens.
-                    vTaskDelay(pdMS_TO_TICKS(800)); 
+                    xSemaphoreGive(buzzerSemaphore);
+
+                    vTaskDelay(pdMS_TO_TICKS(1000)); // Tempo para evitar spam continuo
                 }
                 else
                 {
                     responseDoc["type"] = "feedback";
                     responseDoc["content"]["status"] = "error";
-                    responseDoc["content"]["message"] = "Falha apos 5 tentativas. Aproxime a tag.";
-                    Serial.println("   >>> FALHA NA GRAVACAO.");
-                    
-                    // Pausa menor caso tenha falhado, permitindo continuar a tentar rapidamente
-                    vTaskDelay(pdMS_TO_TICKS(200)); 
+                    responseDoc["content"]["message"] = "Falha ao gravar.";
+                    vTaskDelay(pdMS_TO_TICKS(200));
                 }
 
                 char responseJson[256];

@@ -99,6 +99,12 @@ public:
     void setRegionUS();
 
     /**
+     * @brief Lê o banco de memória TID (Tag ID) da etiqueta em campo.
+     * @return String contendo o TID em Hexadecimal, ou vazio se falhar.
+     */
+    String getTID();
+
+    /**
      * @brief Escreve um novo código EPC na etiqueta.
      * @note A etiqueta deve estar próxima da antena. Cuidado para não ter várias tags perto!
      *

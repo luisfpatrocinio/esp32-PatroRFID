@@ -113,6 +113,74 @@ void R200Driver::setRegionUS()
     sendCommand(0x00, 0x07, &region, 1);
 }
 
+String R200Driver::getTID()
+{
+    // Comando 0x39: Ler Dados -> Banco 0x02 (TID)
+    uint8_t params[9] = {0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x04};
+
+    // Limpa a linha UART
+    while (_serial.available())
+        _serial.read();
+
+    sendCommand(0x00, 0x39, params, 9);
+
+    unsigned long start = millis();
+    int bufIdx = 0;
+    uint8_t buf[64];
+
+    while (millis() - start < 150)
+    {
+        if (_serial.available())
+        {
+            uint8_t b = _serial.read();
+            if (bufIdx == 0 && b != FRAME_HEAD)
+                continue;
+            buf[bufIdx++] = b;
+
+            if (b == FRAME_END && bufIdx >= 7)
+            {
+                uint8_t type = buf[1];
+                uint8_t cmd = buf[2];
+
+                if (type == 0x01 && cmd == 0x39)
+                {
+                    // O tamanho total do pacote de dados recebido
+                    int payloadLen = (buf[3] << 8) | buf[4];
+
+                    // Garante que recebemos o pacote completo antes de cortar
+                    if (bufIdx >= 5 + payloadLen + 2)
+                    {
+
+                        // O R200 junta o EPC e o TID na mesma resposta.
+                        // buf[5] contém o tamanho do EPC.
+                        int epcLen = buf[5];
+
+                        // Onde começa e termina o TID real (ignorando o EPC)
+                        int tidStart = 5 + 1 + epcLen;
+                        int tidLen = payloadLen - 1 - epcLen;
+
+                        if (tidLen > 0)
+                        {
+                            String tid = "";
+                            // Extrai APENAS a assinatura imutável do chip!
+                            for (int i = 0; i < tidLen; i++)
+                            {
+                                if (buf[tidStart + i] < 0x10)
+                                    tid += "0";
+                                tid += String(buf[tidStart + i], HEX);
+                            }
+                            tid.toUpperCase();
+                            return tid;
+                        }
+                    }
+                }
+                bufIdx = 0;
+            }
+        }
+    }
+    return "";
+}
+
 bool R200Driver::processIncomingData(R200Tag &outputTag)
 {
     while (_serial.available())

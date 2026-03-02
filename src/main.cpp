@@ -59,6 +59,10 @@ SemaphoreHandle_t writeDataMutex;
 void setup()
 {
     Serial.begin(115200);
+
+    // Initialize UID Generator
+    randomSeed(analogRead(0));
+
     Serial.println("System Initializing...");
 
     // --- Hardware and Peripheral Initialization ---
@@ -72,7 +76,7 @@ void setup()
 
     // --- CONFIGURAÇÕES VITAIS DO MÓDULO ---
     delay(200);
-    rfid.setRegionUS(); // Frequência Brasil
+    rfid.setRegionUS(); 
     delay(100);
     rfid.setTxPower(26); // Potência de 26 dBm (Ideal para escrita)
     delay(100);
@@ -96,9 +100,7 @@ void setup()
 
     // --- Task Creation ---
     xTaskCreatePinnedToCore(rfidTask, "RFID_Task", 4096, NULL, 2, NULL, 1);
-
     xTaskCreatePinnedToCore(rfidWriteTask, "RFID_Write_Task", 4096, NULL, 2, NULL, 1);
-
     xTaskCreatePinnedToCore(bluetoothTask, "Bluetooth_Task", 4096, NULL, 1, NULL, 1);
     xTaskCreatePinnedToCore(buzzerTask, "Buzzer_Task", 1024, NULL, 1, NULL, 1);
     xTaskCreatePinnedToCore(ledTask, "LED_Task", 2048, NULL, 1, NULL, 1);

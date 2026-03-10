@@ -115,13 +115,9 @@ void R200Driver::setRegionUS()
 
 String R200Driver::getTID()
 {
-    // Comando 0x39: Ler Dados -> Banco 0x02 (TID)
     uint8_t params[9] = {0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x04};
-
-    // Limpa a linha UART
     while (_serial.available())
         _serial.read();
-
     sendCommand(0x00, 0x39, params, 9);
 
     unsigned long start = millis();
@@ -137,44 +133,47 @@ String R200Driver::getTID()
                 continue;
             buf[bufIdx++] = b;
 
-            if (b == FRAME_END && bufIdx >= 7)
+            // Lógica de tamanho rígida para não cortar o TID ao meio
+            if (bufIdx >= 5)
             {
-                uint8_t type = buf[1];
-                uint8_t cmd = buf[2];
+                int payloadLen = (buf[3] << 8) | buf[4];
+                int expectedTotalLen = payloadLen + 7;
 
-                if (type == 0x01 && cmd == 0x39)
+                if (expectedTotalLen > 64 || expectedTotalLen < 7)
                 {
-                    // O tamanho total do pacote de dados recebido
-                    int payloadLen = (buf[3] << 8) | buf[4];
+                    bufIdx = 0;
+                    continue;
+                }
 
-                    // Garante que recebemos o pacote completo antes de cortar
-                    if (bufIdx >= 5 + payloadLen + 2)
+                if (bufIdx == expectedTotalLen)
+                {
+                    if (b == FRAME_END)
                     {
+                        uint8_t type = buf[1];
+                        uint8_t cmd = buf[2];
 
-                        // O R200 junta o EPC e o TID na mesma resposta.
-                        // buf[5] contém o tamanho do EPC.
-                        int epcLen = buf[5];
-
-                        // Onde começa e termina o TID real (ignorando o EPC)
-                        int tidStart = 5 + 1 + epcLen;
-                        int tidLen = payloadLen - 1 - epcLen;
-
-                        if (tidLen > 0)
+                        if (type == 0x01 && cmd == 0x39)
                         {
-                            String tid = "";
-                            // Extrai APENAS a assinatura imutável do chip!
-                            for (int i = 0; i < tidLen; i++)
+                            int epcLen = buf[5];
+                            int tidStart = 5 + 1 + epcLen;
+                            int tidLen = payloadLen - 1 - epcLen;
+
+                            if (tidLen > 0)
                             {
-                                if (buf[tidStart + i] < 0x10)
-                                    tid += "0";
-                                tid += String(buf[tidStart + i], HEX);
+                                String tid = "";
+                                for (int i = 0; i < tidLen; i++)
+                                {
+                                    if (buf[tidStart + i] < 0x10)
+                                        tid += "0";
+                                    tid += String(buf[tidStart + i], HEX);
+                                }
+                                tid.toUpperCase();
+                                return tid;
                             }
-                            tid.toUpperCase();
-                            return tid;
                         }
                     }
+                    bufIdx = 0;
                 }
-                bufIdx = 0;
             }
         }
     }
@@ -189,108 +188,94 @@ bool R200Driver::processIncomingData(R200Tag &outputTag)
 
         // 1. Sincronização (Ignora ruído inicial)
         if (_bufferIndex == 0 && b != FRAME_HEAD)
-        {
             continue;
-        }
 
-        // 2. Armazenamento
+        // 2. Armazena no buffer
         _buffer[_bufferIndex++] = b;
 
-        // 3. Verificação de Fim de Pacote
-        if (b == FRAME_END && _bufferIndex >= 7)
+        // 3. Verificação Inteligente de Fim de Pacote baseada no tamanho real (PL)
+        // Só avaliamos o pacote quando já recebemos o Cabeçalho que contém o tamanho
+        if (_bufferIndex >= 5)
         {
-            uint8_t cmd = _buffer[2];
-            uint8_t type = _buffer[1];
+            // O Payload Length (PL) fica nos bytes 3 (MSB) e 4 (LSB)
+            int payloadLen = (_buffer[3] << 8) | _buffer[4];
 
-            // --- ROTEAMENTO DE PACOTES ---
+            // O tamanho total esperado do pacote é:
+            // Header(1) + Type(1) + Cmd(1) + PL(2) + Payload + Checksum(1) + End(1) = Payload + 7
+            int expectedTotalLen = payloadLen + 7;
 
-            // CASO 1: Leitura de Tag (Sucesso)
-            if (cmd == 0x22 && type == 0x02)
+            // Prevenção contra lixo e estouro de memória (descarta pacotes impossíveis)
+            if (expectedTotalLen > 255 || expectedTotalLen < 7)
             {
-                parsePacket(_buffer, _bufferIndex, outputTag);
-                _bufferIndex = 0; // Limpa para o próximo
-                return true;      // Avisa o main que tem Tag nova!
-            }
-            // CASO 2: Confirmação de Escrita
-            else if (cmd == 0x49)
-            {
-                writeStatus = 1; // SUCESSO!
-                Serial.println("[R200] Escrita realizada com SUCESSO!");
-            }
-            // CASO 3: Erro (Leitura ou Escrita)
-            else if (cmd == 0xFF)
-            {
-                uint8_t errCode = _buffer[5];
-                writeStatus = errCode; // Guarda o código do erro (ex: 0x16)
-
-                Serial.print("[R200] Erro: 0x");
-                Serial.println(errCode, HEX);
-
-                if (errCode == 0x16)
-                    Serial.println("-> Acesso Negado (Senha incorreta ou Bloqueada)");
-                if (errCode == 0x10)
-                    Serial.println("-> Falha (Tag longe ou inexistente)");
-                if (errCode == 0x15)
-                    Serial.println("-> Nenhuma tag detectada no Poll");
-            }
-            // CASO 4: Info de Hardware
-            else if (cmd == 0x03)
-            {
-                Serial.print("[DEBUG] Hardware Info RAW: ");
-                for (int i = 0; i < _bufferIndex; i++)
-                    Serial.print(_buffer[i], HEX);
-                Serial.println();
+                _bufferIndex = 0;
+                continue;
             }
 
-            // Reset final do buffer para qualquer pacote processado (que não retornou antes)
-            _bufferIndex = 0;
+            // Se o buffer chegou no tamanho exato que o pacote DEVE ter
+            if (_bufferIndex == expectedTotalLen)
+            {
+                if (b == FRAME_END) // Agora sim, confirmamos se o último byte é o 0xDD
+                {
+                    uint8_t cmd = _buffer[2];
+                    uint8_t type = _buffer[1];
+
+                    // CASO 1: Leitura de Tag
+                    if (cmd == 0x22 && type == 0x02)
+                    {
+                        parsePacket(_buffer, _bufferIndex, outputTag);
+                        _bufferIndex = 0;
+                        return true;
+                    }
+                    // CASO 2: Resposta de Escrita
+                    else if (cmd == 0x49)
+                    {
+                        writeStatus = 1;
+                        _bufferIndex = 0;
+                    }
+                    // CASO 3: Erro do R200
+                    else if (cmd == 0xFF)
+                    {
+                        writeStatus = _buffer[5];
+                        _bufferIndex = 0;
+                    }
+                    else
+                    {
+                        _bufferIndex = 0; // Ignora
+                    }
+                }
+                else
+                {
+                    // Chegou no tamanho esperado, mas o último byte não era DD. Lixo de rádio!
+                    _bufferIndex = 0;
+                }
+            }
         }
-
-        // Proteção Overflow
-        if (_bufferIndex >= 256)
-            _bufferIndex = 0;
     }
-
-    return false; // Nenhuma tag lida neste ciclo
+    return false;
 }
 
 void R200Driver::parsePacket(uint8_t *pkt, int length, R200Tag &tag)
 {
-    /**
-     * Estrutura do Frame de Resposta (Notification):
-     * [0] AA (Header)
-     * [1] Type (0x02)
-     * [2] Cmd (0x22)
-     * [3] PL MSB
-     * [4] PL LSB
-     * [5] RSSI  <-- Início dos dados úteis
-     * [6] PC MSB
-     * [7] PC LSB
-     * [8...] EPC Bytes
-     * [...] CRC MSB
-     * [...] CRC LSB
-     * [N-2] Checksum
-     * [N-1] DD (End)
-     */
+    tag.rssi = pkt[5];
 
-    tag.rssi = pkt[5]; // Byte de RSSI
-
-    // Cálculo do tamanho do EPC:
-    // O Parameter Length (PL) inclui: RSSI(1) + PC(2) + EPC(x) + CRC(2)
-    // Logo: Tamanho EPC = PL - 1 - 2 - 2 = PL - 5.
     int paramLen = (pkt[3] << 8) | pkt[4];
     int epcLen = paramLen - 5;
 
+    // --- Trava de Segurança ---
+    if (epcLen < 0 || epcLen > 64)
+    {
+        tag.valid = false;
+        return;
+    }
+
     tag.epc = "";
-    // Extração dos bytes do EPC
     for (int i = 0; i < epcLen; i++)
     {
-        // Formatação para garantir dois dígitos hexadecimais (ex: 0A ao invés de A)
         if (pkt[8 + i] < 0x10)
             tag.epc += "0";
         tag.epc += String(pkt[8 + i], HEX);
     }
-    tag.epc.toUpperCase(); // Padronização visual
+    tag.epc.toUpperCase();
     tag.valid = true;
 }
 

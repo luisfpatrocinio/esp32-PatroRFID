@@ -101,10 +101,9 @@ void rfidTask(void *parameter)
 
                 // LÊ O IDENTIFICADOR ÚNICO DE FÁBRICA
                 String hardwareTID = rfid.getTID();
-                if (hardwareTID == "")
-                    hardwareTID = readTag.epc; // Backup
 
-                if (hardwareTID != lastTID)
+                // Se o TID falhar, NUNCA usar o EPC como plano B. Apenas ignora e tenta de novo.
+                if (hardwareTID != "" && hardwareTID != lastTID)
                 {
                     lastTID = hardwareTID;
                     String decodedText = hexToText(readTag.epc);
@@ -171,7 +170,7 @@ void rfidWriteTask(void *parameter)
             sessionWrittenCount = 0;
         }
 
-        if (isWriteMode && localDataToRecord.length() > 0)
+        if (isWriteMode)
         {
             if (currentButtonState == LOW)
             {
@@ -203,14 +202,14 @@ void rfidWriteTask(void *parameter)
                     vTaskDelay(pdMS_TO_TICKS(15));
                     while (Serial2.available())
                         Serial2.read();
+
                     targetTID = rfid.getTID();
-                    if (targetTID == "")
-                        targetTID = tempTag.epc;
                 }
 
+                // Se não achou uma tag válida ou se a extração do TID físico falhou, recomeça
                 if (targetTID == "")
                 {
-                    vTaskDelay(pdMS_TO_TICKS(30)); // Varrer mais rápido se o campo estiver vazio
+                    vTaskDelay(pdMS_TO_TICKS(30)); // Varrer mais rápido
                     continue;
                 }
 

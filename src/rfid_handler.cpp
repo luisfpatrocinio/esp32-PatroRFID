@@ -140,8 +140,14 @@ void rfidTask(void *parameter)
 }
 
 //==============================================================================
-// RFID WRITER TASK
+// RFID WRITER TASK (Com Memória de Sessão e Varredura Rápida)
 //==============================================================================
+
+// Variáveis para a Memória de Sessão
+#define MAX_SESSION_TAGS 50
+String sessionWrittenTags[MAX_SESSION_TAGS];
+int sessionWrittenCount = 0;
+
 void rfidWriteTask(void *parameter)
 {
     for (;;)
@@ -156,9 +162,18 @@ void rfidWriteTask(void *parameter)
             xSemaphoreGive(writeDataMutex);
         }
 
+        // Monitora o estado do botão
+        int currentButtonState = digitalRead(READ_BUTTON_PIN);
+
+        // Se o botão for solto, limpa a memória para a próxima sessão de gravação
+        if (currentButtonState == HIGH)
+        {
+            sessionWrittenCount = 0;
+        }
+
         if (isWriteMode && localDataToRecord.length() > 0)
         {
-            if (digitalRead(READ_BUTTON_PIN) == LOW)
+            if (currentButtonState == LOW)
             {
                 // 1. DESCOBRIR A UID DA ETIQUETA EM CAMPO
                 String targetTID = "";
@@ -170,7 +185,7 @@ void rfidWriteTask(void *parameter)
                 rfid.singlePoll();
 
                 unsigned long pollStart = millis();
-                while (millis() - pollStart < 100)
+                while (millis() - pollStart < 80) // Acelerado para 80ms
                 {
                     if (rfid.processIncomingData(tempTag))
                     {
@@ -195,9 +210,28 @@ void rfidWriteTask(void *parameter)
 
                 if (targetTID == "")
                 {
-                    vTaskDelay(pdMS_TO_TICKS(100));
+                    vTaskDelay(pdMS_TO_TICKS(30)); // Varrer mais rápido se o campo estiver vazio
                     continue;
                 }
+
+                // --- NOVO: FILTRO ANTI-REPETIÇÃO ---
+                bool alreadyWritten = false;
+                for (int i = 0; i < sessionWrittenCount; i++)
+                {
+                    if (sessionWrittenTags[i] == targetTID)
+                    {
+                        alreadyWritten = true;
+                        break;
+                    }
+                }
+
+                if (alreadyWritten)
+                {
+                    // Já gravamos nesta etiqueta! Pula imediatamente sem demorar.
+                    vTaskDelay(pdMS_TO_TICKS(10));
+                    continue;
+                }
+                // -----------------------------------
 
                 // 2. PREPARAR DADOS E GRAVAR
                 String epcToSend = localDataToRecord;
@@ -260,18 +294,25 @@ void rfidWriteTask(void *parameter)
 
                 if (success)
                 {
+                    // Registra que a gravação teve sucesso para ignorar na próxima volta!
+                    if (sessionWrittenCount < MAX_SESSION_TAGS)
+                    {
+                        sessionWrittenTags[sessionWrittenCount++] = targetTID;
+                    }
+
                     responseDoc["type"] = "writeResult";
                     responseDoc["content"]["status"] = "ok";
-                    // Envia exatamente o UID de hardware lido na linha 147!
                     responseDoc["content"]["uid"] = targetTID;
                     responseDoc["content"]["data"] = localDataToRecord;
                     responseDoc["content"]["message"] = "Gravado com Sucesso!";
 
                     xSemaphoreGive(buzzerSemaphore);
-                    vTaskDelay(pdMS_TO_TICKS(100));
+                    vTaskDelay(pdMS_TO_TICKS(80));
                     xSemaphoreGive(buzzerSemaphore);
 
-                    vTaskDelay(pdMS_TO_TICKS(1000)); // Tempo para evitar spam continuo
+                    // DELAY DE 1 SEGUNDO REMOVIDO!
+                    // Agora espera só uma fração de segundo e já vai para a próxima etiqueta
+                    vTaskDelay(pdMS_TO_TICKS(50));
                 }
                 else
                 {

@@ -1,87 +1,82 @@
-# Patro ESP32 Handheld RFID Reader/Writer
+🌎 [English](README.md) | 🇧🇷 [Português](README.pt-br.md)
 
-Firmware for a versatile handheld RFID reader and writer based on the ESP32 and MFRC522 module. The project features a robust, multi-tasking architecture using FreeRTOS, a modular codebase for easy maintenance, and a comprehensive JSON-based command and response protocol over **Bluetooth Low Energy (BLE)**.
+# Smart UHF Reader (Smart Stock Project)
+
+Firmware for a versatile handheld RFID UHF reader and writer based on the ESP32 and the R200 module. This device acts as the data collection endpoint for the **Smart Stock** project — an innovative inventory control system created under the **EmbarcaTech Program**.
+
+The project features a robust, multi-tasking architecture using FreeRTOS, advanced UHF radio manipulation, and a comprehensive JSON-based command protocol over **Bluetooth Low Energy (BLE)** to communicate seamlessly with mobile applications.
 
 ![PatroRFID Project Photo](PatroRFID.png)
 
-## ✨ Features
+## ✨ Key Features & Engineering Solutions
 
-- **Dual Read/Write Modes:** Seamlessly switch between reading existing tags and writing new data.
-- **Bluetooth Low Energy (BLE):** Modern, low-power wireless communication for connecting to a wide range of devices like smartphones and PCs.
-- **Remote Device Control:** Change operational modes and toggle audible feedback remotely via BLE commands.
-- **Advanced JSON Protocol:** A well-defined API for sending commands (e.g., change mode, write data) and receiving structured responses (e.g., read results, write confirmations).
-- **Multi-Tasking Architecture:** Built on FreeRTOS to concurrently handle RFID operations, BLE communication, and user interface feedback without blocking.
-- **Configurable User Feedback:** Provides both audible (buzzer) and visual (LED) feedback for operations, with sound being remotely configurable.
-- **Modular Codebase:** The source code is organized into logical modules (BLE, RFID, UI), making it clean, scalable, and easy to maintain or extend.
+- **Dual Read/Write Modes:** Seamlessly switch between reading existing tags and writing new data through the BLE app interface.
+- **Continuous Mode ("Machine Gun"):** The trigger button can be held down to read or write multiple tags in batches, ideal for fast shelf scanning.
+- **Session Memory (Anti-Spam Filter):** To avoid "Capture Blindness" (where the antenna monopolizes the signal of the closest tag), the ESP32 temporarily memorizes tags already processed in the current cycle, physically ignoring them to read tags at the bottom of boxes.
+- **"Factory Fingerprint" Usage (96-bit TID):** Instead of using the rewritable EPC as a UID, the system extracts the hardware TID (Immutable) from the tag by sending complex `0x39` extraction commands. This guarantees absolute data integrity in the Smart Stock database, making item duplication impossible.
+- **Anti Cross-Talk Shield:** In high-density environments, the firmware cross-references the EPC information with the TID response to ensure it is not merging responses from neighboring tags (avoiding "Frankenstein" packets).
+- **Packet Cleaning (Sanity Check):** Strict UART buffer protection against corrupted packets and radio noise, preventing the sending of garbage data or "Unknown Products" to the App.
+- **Tag Restoration (Zero Padding):** Reusability of inventory tags by sending empty string commands (`""`), which the ESP32 translates into null padding (hexadecimal zeros) to cleanly reset the chip's memory.
+- **Multi-Tasking Architecture:** Built on FreeRTOS to concurrently handle RFID operations, BLE communication, and UI feedback without blocking the radio's serial communication.
 
 ## ⚙️ Hardware Specifications
 
 - 1 x ESP32 Development Board
-- 1 x MFRC522 RFID Reader Module (13.56MHz)
+- 1 x R200 UHF RFID Reader Module (UART)
 - 1 x Push Button, Momentary
-- 1 x Passive Buzzer
+- 1 x Active Buzzer
 - 1 x 5mm LED (any color)
 - 1 x 220-330 Ohm Resistor
 - Breadboard and Jumper Wires
 
 ## 🔌 Wiring Diagram
 
-| Component        | ESP32 Pin |
-| :--------------- | :-------- |
-| **MFRC522 SDA**  | `GPIO 5`  |
-| **MFRC522 SCK**  | `GPIO 18` |
-| **MFRC522 MOSI** | `GPIO 23` |
-| **MFRC522 MISO** | `GPIO 19` |
-| **MFRC522 RST**  | `GPIO 4`  |
-| **Buzzer (+)**   | `GPIO 22` |
-| **Button**       | `GPIO 21` |
-| **LED (+)**      | `GPIO 2`  |
-| **VCC (3.3V)**   | `3V3`     |
-| **GND**          | `GND`     |
-
-_Note: The Button is configured with an internal pull-up resistor. The LED's anode connects to the GPIO pin via the current-limiting resistor._
+| Component         | ESP32 Pin | Note                             |
+| :---------------- | :-------- | :------------------------------- |
+| **R200 TX**       | `GPIO 16` | Connect to ESP32 RX              |
+| **R200 RX**       | `GPIO 17` | Connect to ESP32 TX              |
+| **Buzzer (+)**    | `GPIO 22` | Active Buzzer                    |
+| **Button**        | `GPIO 21` | Configured with internal pull-up |
+| **LED (+)**       | `GPIO 2`  | With current-limiting resistor   |
+| **VCC (3.3V/5V)** | `VCC`     | Check R200 input requirements    |
+| **GND**           | `GND`     | Common Ground                    |
 
 ## 💻 Software & Deployment
 
 This project is configured for the **PlatformIO** ecosystem within Visual Studio Code.
 
 1.  **Environment:** Ensure the [PlatformIO IDE extension](https://platformio.org/platformio-ide) is installed in VS Code.
-2.  **Dependencies:** The required libraries (`MFRC522`, `ArduinoJson`) are listed in the `platformio.ini` file and will be installed automatically by PlatformIO upon the first build.
+2.  **Dependencies:** The required libraries (e.g., `ArduinoJson`) are listed in the `platformio.ini` file and will be installed automatically by PlatformIO upon the first build.
 3.  **Build & Upload:**
     - Clone the repository.
     - Open the project folder in VS Code.
-    - Use the PlatformIO toolbar to **Upload** the firmware to the ESP32.
+    - Connect your ESP32 board via USB.
+    - Use the PlatformIO toolbar to **Upload** the firmware.
 
 ## 📖 Operational Guide
 
 1.  **Power On:** Apply power to the ESP32. The status LED will blink slowly, indicating it is advertising and ready for a BLE connection.
-2.  **Connect via BLE:** Use a BLE scanner application (like nRF Connect, LightBlue, or a custom app) to connect to the device named `PatroRFID-Reader`. Once connected, the LED will stop blinking.
-3.  **Subscribe to Notifications:** To receive data from the reader, you must subscribe to notifications on the device's characteristic.
+2.  **Connect via BLE:** Use the Smart Stock mobile application to connect to the device named `PatroRFID-Reader`. Once connected, the LED will stop blinking.
 
-### Reading a Tag
+### Reading a Tag (Default)
 
-- By default, the device is in Read Mode.
-- Press and hold the push button. The status LED will illuminate, indicating the RFID reader is active.
-- Present a compatible RFID tag to the MFRC522 antenna.
-- A successful read triggers a beep (if sound is enabled), and a `readResult` JSON payload is sent via BLE notification.
+- Press and hold the push button. The reader will continuously scan for tags.
+- A successful read triggers a beep, and a `readResult` JSON payload (containing the immutable TID and decoded data) is sent to the app.
 
 ### Writing to a Tag
 
-1.  **Enter Write Mode:** Send the `changeMode` command to switch the device to write mode.
-2.  **Send Data:** Send the `writeData` command containing the string you wish to write.
-3.  **Present Tag:** Present a compatible RFID tag to the antenna. The device will automatically attempt to write the data.
-4.  **Receive Confirmation:** The device will send a `writeResult` JSON payload confirming the success or failure of the operation.
-5.  **Exit Write Mode:** Send the `changeMode` command again to return to read mode.
+1.  **Enter Write Mode:** The app sends the `changeMode` command (`"write"`).
+2.  **Send Data:** The app sends the `writeData` command containing the SKU/String to write.
+3.  **Present Tag:** Press the button and hold the pistol near the tags. The device discovers the hardware TID, overwrites the EPC, and manages the session memory to quickly jump to the next unwritten tag.
+4.  **Receive Confirmation:** The device sends a `writeResult` JSON payload confirming the success and echoing the unique TID.
 
-## 📶 Communication Protocol (API)
+## 📶 Communication Protocol (BLE JSON)
 
-Communication is handled via a single BLE characteristic that accepts JSON commands and sends JSON responses/data via notifications.
+Communication is handled via a single BLE characteristic that accepts JSON commands and sends JSON responses via notifications.
 
 ### Client → Device (Commands)
 
 #### 1. Change Operational Mode
-
-Switches between read and write modes.
 
 ```json
 {
@@ -90,97 +85,91 @@ Switches between read and write modes.
 }
 ```
 
-- `content` can be `"write"` to activate write mode or `"stop"` to return to the default read mode.
+_(Use `"stop"` to return to read mode)_
 
 #### 2. Send Data for Writing
-
-Provides the data to be written to the next tag presented (must be in write mode).
 
 ```json
 {
   "type": "writeData",
-  "content": "Hello World"
+  "content": "SENYAR13021"
 }
 ```
 
-- `content` is a string (up to 15 characters will be written).
+#### 3. Restore Tag (Clear Memory)
 
-#### 3. Toggle Sound
+```json
+{
+  "type": "writeData",
+  "content": ""
+}
+```
 
-Enables or disables the audible buzzer feedback.
+#### 4. Toggle Sound
 
-````json
+```json
 {
   "type": "toggleSound",
   "content": "off"
 }
-```*   `content` can be `"on"` or `"off"`.
+```
 
 ### Device → Client (Responses & Data)
 
 #### 1. RFID Read Result
-Sent when a tag is successfully read.
+
+Sent when a tag is successfully read and validated against cross-talk.
+
 ```json
 {
   "type": "readResult",
-  "uid": "A1:B2:C3:D4",
-  "data": "Contents of Tag"
+  "content": {
+    "status": "ok",
+    "uid": "E28069152000501D1A2B3C4D",
+    "rssi": 194,
+    "data": "SENYAR13021"
+  }
 }
-````
+```
 
 #### 2. RFID Write Result
 
-Sent after a write attempt is made.
-
-- **Success:**
-  ```json
-  {
-    "type": "writeResult",
-    "content": {
-      "status": "ok",
-      "message": "Write successful"
-    }
-  }
-  ```
-- **Failure:**
-  ```json
-  {
-    "type": "writeResult",
-    "content": {
-      "status": "error",
-      "message": "Authentication Failed"
-    }
-  }
-  ```
-
-#### 3. General Feedback
-
-Sent in response to commands like changing mode or toggling sound.
+Sent after a successful write cycle.
 
 ```json
 {
-  "type": "feedback",
+  "type": "writeResult",
   "content": {
     "status": "ok",
-    "mode": "write",
-    "message": "Write mode activated"
+    "uid": "E28069152000501D1A2B3C4D",
+    "data": "SENYAR13021",
+    "message": "Gravado com Sucesso!"
   }
 }
 ```
 
 ## 🏗️ Code Structure
 
-The firmware is organized into a clean, modular architecture to promote separation of concerns:
+The firmware is organized into a clean, modular architecture:
 
-- `main.cpp`: The main entry point, responsible for initialization and task creation.
-- `config.h`: Centralized definitions for hardware pins and constants.
-- `rtos_comm.h`: Declares all shared global variables and FreeRTOS primitives.
-- `ble_comm.cpp / .h`: Manages all BLE functionality.
-- `rfid_handler.cpp / .h`: Contains the FreeRTOS tasks for RFID reading and writing.
-- `ui_handler.cpp / .h`: Manages user feedback tasks (LED and Buzzer).
+- `main.cpp`: The main entry point, initialization, and FreeRTOS task creation.
+- `config.h`: Centralized definitions for hardware pins and UART constants.
+- `R200.cpp / .h`: Low-level driver for the R200 UHF module (UART byte routing, TID extraction, padding).
+- `rtos_comm.h`: Declares shared global variables and FreeRTOS primitives.
+- `ble_comm.cpp / .h`: Manages BLE services and characteristic callbacks.
+- `rfid_handler.cpp / .h`: The core logic for continuous reading, writing, and session memory management.
+- `ui_handler.cpp / .h`: Non-blocking LED and Buzzer tasks.
 
 ## 📄 License
 
 This project is licensed under the MIT License.
-Feel free to use it in your projects -- just make sure to credit **Luis Felipe Patrocinio** ([GitHub](https://github.com/luisfpatrocinio)).
-See the [LICENSE](./LICENSE) file for full details.
+See the [LICENSE](https://github.com/luisfpatrocinio/esp32-PatroRFID/blob/main/LICENSE) file for full details.
+
+## 👨‍💻 Authors
+
+This project was created and maintained by:
+
+- **[Luis Felipe Patrocinio](https://github.com/luisfpatrocinio/)**
+- **[João Pedro Mendes de Oliveira](https://github.com/Jpedro23)**
+
+Developed for the **Smart Stock** project under the **EmbarcaTech Program**.

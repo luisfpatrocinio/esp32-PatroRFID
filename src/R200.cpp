@@ -113,9 +113,12 @@ void R200Driver::setRegionUS()
     sendCommand(0x00, 0x07, &region, 1);
 }
 
-String R200Driver::getTID()
+String R200Driver::getTID(String expectedEPC)
 {
-    uint8_t params[9] = {0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x04};
+    // Comando 0x39: Ler Dados -> Banco 0x02 (TID)
+    // O 0x06 no final significa ler 6 Words (12 bytes) para extrair o Número de Série Único!
+    uint8_t params[9] = {0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x06};
+
     while (_serial.available())
         _serial.read();
     sendCommand(0x00, 0x39, params, 9);
@@ -133,7 +136,6 @@ String R200Driver::getTID()
                 continue;
             buf[bufIdx++] = b;
 
-            // Lógica de tamanho rígida para não cortar o TID ao meio
             if (bufIdx >= 5)
             {
                 int payloadLen = (buf[3] << 8) | buf[4];
@@ -160,6 +162,18 @@ String R200Driver::getTID()
 
                             if (tidLen > 0)
                             {
+                                // 1. Extrai o EPC que o chip informou junto com o TID
+                                String readEPC = "";
+                                int epcBytes = epcLen - 2; // Subtrai o cabeçalho PC (2 bytes)
+                                for (int i = 0; i < epcBytes; i++)
+                                {
+                                    if (buf[8 + i] < 0x10)
+                                        readEPC += "0";
+                                    readEPC += String(buf[8 + i], HEX);
+                                }
+                                readEPC.toUpperCase();
+
+                                // 2. Extrai o TID (Agora os 12 bytes completos!)
                                 String tid = "";
                                 for (int i = 0; i < tidLen; i++)
                                 {
@@ -168,6 +182,14 @@ String R200Driver::getTID()
                                     tid += String(buf[tidStart + i], HEX);
                                 }
                                 tid.toUpperCase();
+
+                                // 3. O FILTRO DE MENTIRAS (Anti Cross-Talk)
+                                // Impede que uma etiqueta vizinha "roube" a resposta
+                                if (expectedEPC != "" && readEPC != expectedEPC)
+                                {
+                                    return "";
+                                }
+
                                 return tid;
                             }
                         }

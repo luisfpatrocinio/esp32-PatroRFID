@@ -99,8 +99,8 @@ void rfidTask(void *parameter)
                 while (Serial2.available())
                     Serial2.read();
 
-                // LÊ O IDENTIFICADOR ÚNICO DE FÁBRICA
-                String hardwareTID = rfid.getTID();
+                // LÊ O IDENTIFICADOR ÚNICO DE FÁBRICA (Protegido contra Cross-Talk)
+                String hardwareTID = rfid.getTID(readTag.epc);
 
                 // Se o TID falhar, NUNCA usar o EPC como plano B. Apenas ignora e tenta de novo.
                 if (hardwareTID != "" && hardwareTID != lastTID)
@@ -203,7 +203,8 @@ void rfidWriteTask(void *parameter)
                     while (Serial2.available())
                         Serial2.read();
 
-                    targetTID = rfid.getTID();
+                    // Passa o EPC alvo para garantir que não lemos a tag vizinha
+                    targetTID = rfid.getTID(tempTag.epc);
                 }
 
                 // Se não achou uma tag válida ou se a extração do TID físico falhou, recomeça

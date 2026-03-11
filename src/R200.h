@@ -102,7 +102,7 @@ public:
      * @brief Lê o banco de memória TID (Tag ID) da etiqueta em campo.
      * @return String contendo o TID em Hexadecimal, ou vazio se falhar.
      */
-    String getTID();
+    String getTID(String expectedEPC = "");
 
     /**
      * @brief Escreve um novo código EPC na etiqueta.
